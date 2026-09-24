@@ -1,0 +1,27 @@
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Xcode and Build Artifacts
+build/
+DerivedData/
+*.xcuserstate
+project.xcworkspace/xcuserdata/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+.build/
+
+# Application Bundle & Binaries
+DropShelf.app
+*.dmg
+.dmg_temp/
+test_binary
+test_drop_files/
+
+# Temporary / Scratch Files
+*.tmp
+*.log

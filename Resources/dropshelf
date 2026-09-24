@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# DropShelf CLI Utility
+# Control DropShelf and send files, links, or colors directly from terminal
+
+set -e
+
+SHOW_HELP() {
+    cat << 'EOF'
+DropShelf CLI Utility
+Usage:
+  dropshelf <files...>          Add one or more files to DropShelf
+  dropshelf --text, -m <text>   Add text, URL, or color hex to DropShelf
+  dropshelf --toggle, -t        Toggle DropShelf window visibility
+  dropshelf --collapse          Collapse DropShelf to edge tab
+  dropshelf --uncollapse        Uncollapse DropShelf
+  dropshelf --stack             Combine all files into a single stack
+  dropshelf --unstack           Separate stacked files into individual cards
+  dropshelf --clear, -c         Clear all active items from shelf
+  dropshelf --history, -h       Open Recent Drops History drawer
+  dropshelf --theme <name>      Set appearance theme (dark, light, auto)
+  dropshelf --mode <name>       Set transfer mode (copy, cut)
+  dropshelf --grid              Toggle Quick Action Grid
+  dropshelf --help              Show this help message
+
+Examples:
+  dropshelf document.pdf image.png
+  dropshelf ~/Downloads/*.jpg
+  dropshelf --text "#3B82F6"
+  dropshelf --text "https://github.com/hamidarslan/DropShelf-macOS"
+  echo "https://apple.com" | dropshelf
+  echo "#FF5733" | dropshelf
+  dropshelf --toggle
+  dropshelf --theme light
+  dropshelf --mode copy
+  dropshelf --grid
+EOF
+    exit 0
+}
+
+urlencode() {
+    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+}
+
+if [ $# -eq 0 ]; then
+    # Check if input is piped
+    if [ ! -t 0 ]; then
+        TMP_INPUT="$(cat)"
+        if [ -n "$TMP_INPUT" ]; then
+            # If input matches an existing file path
+            if [ -e "$TMP_INPUT" ]; then
+                FULL_PATH="$(cd "$(dirname "$TMP_INPUT")" && pwd)/$(basename "$TMP_INPUT")"
+                open -a DropShelf "$FULL_PATH"
+            else
+                ENCODED=$(urlencode "$TMP_INPUT")
+                open "dropshelf://add?text=${ENCODED}"
+            fi
+            exit 0
+        fi
+    fi
+    SHOW_HELP
+fi
+
+case "$1" in
+    -t|--toggle)
+        open "dropshelf://toggle"
+        ;;
+    --collapse)
+        open "dropshelf://collapse"
+        ;;
+    --uncollapse)
+        open "dropshelf://uncollapse"
+        ;;
+    --stack)
+        open "dropshelf://stack"
+        ;;
+    --unstack)
+        open "dropshelf://unstack"
+        ;;
+    -c|--clear)
+        open "dropshelf://clear"
+        ;;
+    -h|--history)
+        open "dropshelf://history"
+        ;;
+    --theme)
+        shift
+        if [ $# -gt 0 ]; then
+            open "dropshelf://theme?name=$1"
+        else
+            echo "Error: No theme specified (use: dark, light, auto)" >&2
+            exit 1
+        fi
+        ;;
+    --mode)
+        shift
+        if [ $# -gt 0 ]; then
+            open "dropshelf://mode?name=$1"
+        else
+            echo "Error: No mode specified (use: copy, cut)" >&2
+            exit 1
+        fi
+        ;;
+    --grid)
+        open "dropshelf://grid"
+        ;;
+    -m|--text)
+        shift
+        if [ $# -gt 0 ]; then
+            ENCODED=$(urlencode "$*")
+            open "dropshelf://add?text=${ENCODED}"
+        else
+            echo "Error: No text provided" >&2
+            exit 1
+        fi
+        ;;
+    --help)
+        SHOW_HELP
+        ;;
+    *)
+        for item in "$@"; do
+            if [ -e "$item" ]; then
+                FULL_PATH="$(cd "$(dirname "$item")" && pwd)/$(basename "$item")"
+                open -a DropShelf "$FULL_PATH"
+            else
+                echo "Warning: File not found: $item" >&2
+            fi
+        done
+        ;;
+esac

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="wood" x1="0" y1="0" x2="0.9" y2="1">
+    <stop offset="0" stop-color="#E9B46D"/><stop offset="0.35" stop-color="#C9823E"/>
+    <stop offset="0.72" stop-color="#A95E27"/><stop offset="1" stop-color="#7D3F17"/>
+  </linearGradient>
+  <linearGradient id="woodLight" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#F7D59B"/><stop offset="0.28" stop-color="#DE9A52"/>
+    <stop offset="1" stop-color="#A75A27"/>
+  </linearGradient>
+  <linearGradient id="cavity" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#4B240F"/><stop offset="0.55" stop-color="#6D3415"/>
+    <stop offset="1" stop-color="#A35C29"/>
+  </linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#67C7FF"/><stop offset="0.35" stop-color="#2F8FF5"/>
+    <stop offset="1" stop-color="#0D4CB9"/>
+  </linearGradient>
+  <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E5EAF0"/>
+  </linearGradient>
+  <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#F9FBFC"/><stop offset="0.4" stop-color="#B7BEC7"/>
+    <stop offset="1" stop-color="#6F7780"/>
+  </linearGradient>
+  <radialGradient id="shine" cx="0.25" cy="0.12" r="0.8">
+    <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.62"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+    <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#3A1A08" flood-opacity="0.27"/>
+  </filter>
+  <filter id="inner" x="-20%" y="-20%" width="140%" height="140%">
+    <feGaussianBlur stdDeviation="10" result="b"/><feComposite in="b" in2="SourceGraphic" operator="out" result="i"/>
+    <feFlood flood-color="#321708" flood-opacity="0.6" result="c"/><feComposite in="c" in2="i" operator="in"/><feComposite in2="SourceGraphic" operator="over"/>
+  </filter>
+  <clipPath id="outerClip"><rect x="92" y="92" width="840" height="840" rx="190"/></clipPath>
+</defs>
+
+<g filter="url(#shadow)">
+  <rect x="92" y="92" width="840" height="840" rx="190" fill="url(#wood)"/>
+  <rect x="107" y="107" width="810" height="810" rx="175" fill="none" stroke="#F4CE90" stroke-opacity="0.72" stroke-width="8"/>
+
+  <!-- rear cavity -->
+  <path d="M190 205 Q190 160 235 160 H789 Q834 160 834 205 V654 H190 Z" fill="url(#cavity)"/>
+  <path d="M208 224 Q208 181 249 181 H775 Q816 181 816 224 V622 H208 Z" fill="#5A2B12" opacity="0.55"/>
+  <ellipse cx="515" cy="629" rx="322" ry="62" fill="#351708" opacity="0.26"/>
+
+  <!-- documents -->
+  <g transform="translate(0 8)">
+    <g transform="rotate(-4 390 435)">
+      <rect x="300" y="245" width="265" height="360" rx="42" fill="url(#paper)" stroke="#CFD6DE" stroke-width="5"/>
+      <rect x="344" y="314" width="165" height="20" rx="10" fill="#AEB9C5"/>
+      <rect x="344" y="362" width="133" height="18" rx="9" fill="#C3CBD3"/>
+      <rect x="344" y="410" width="158" height="18" rx="9" fill="#C3CBD3"/>
+      <rect x="344" y="458" width="120" height="18" rx="9" fill="#C3CBD3"/>
+    </g>
+    <g transform="rotate(5 635 440)">
+      <rect x="472" y="294" width="330" height="300" rx="46" fill="url(#blue)" stroke="#89D6FF" stroke-width="6"/>
+      <rect x="500" y="326" width="274" height="234" rx="32" fill="#1260CA" opacity="0.85"/>
+      <path d="M520 532 L602 430 L675 516 L714 476 L764 532 Z" fill="#80C9FF" opacity="0.95"/>
+      <circle cx="712" cy="383" r="34" fill="#9FDFFF"/>
+      <path d="M492 310 Q610 292 782 335" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="12" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- front drawer / shelf -->
+  <path d="M150 580 Q150 540 190 540 H341 Q371 540 392 518 L426 482 Q446 460 476 460 H548 Q578 460 598 482 L632 518 Q653 540 683 540 H834 Q874 540 874 580 V810 Q874 852 832 852 H192 Q150 852 150 810 Z" fill="url(#woodLight)"/>
+  <path d="M172 601 H852" stroke="#F1C98A" stroke-opacity="0.6" stroke-width="7"/>
+  <path d="M175 785 Q175 825 215 825 H809 Q849 825 849 785" fill="none" stroke="#7D3F17" stroke-opacity="0.42" stroke-width="7"/>
+  <rect x="424" y="583" width="176" height="85" rx="38" fill="#5E2D13" opacity="0.82"/>
+  <path d="M451 602 H573 Q586 602 584 616 L575 647 Q570 663 554 663 H470 Q454 663 449 647 L440 616 Q438 602 451 602 Z" fill="url(#metal)" stroke="#5E6368" stroke-width="5"/>
+
+  <!-- wood grain -->
+  <g clip-path="url(#outerClip)" fill="none" stroke="#6A3215" stroke-opacity="0.12" stroke-width="4">
+    <path d="M120 174 C290 130 430 200 580 165 S820 120 935 185"/>
+    <path d="M110 739 C260 702 372 771 541 742 S781 698 930 756"/>
+    <path d="M120 830 C270 798 420 860 580 823 S820 786 932 844"/>
+    <path d="M160 692 C316 650 438 716 596 686 S805 647 882 704"/>
+  </g>
+  <rect x="92" y="92" width="840" height="840" rx="190" fill="url(#shine)"/>
+</g>
+</svg>

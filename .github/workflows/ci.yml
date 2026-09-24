@@ -1,0 +1,56 @@
+name: Repository checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-test:
+    name: Build and regression tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build signed app and installer
+        run: bash build.sh
+      - name: Regression tests
+        run: bash Tests/run.sh
+      - name: Clipboard precision and privacy tests
+        run: bash Tests/clipboard.sh
+      - name: Image correctness tests
+        run: bash Tests/images.sh
+      - name: PDF correctness tests
+        run: bash Tests/pdf.sh
+      - name: Operation cancellation tests
+        run: bash Tests/operations.sh
+      - name: Coordinator lifecycle tests
+        run: bash Tests/coordinator.sh
+      - name: Background-removal safety tests
+        run: bash Tests/background.sh
+      - name: Bundled icon checks
+        run: bash Tests/check-icons.sh DropShelf.app
+      - name: Validate signature and installer
+        run: |
+          codesign --verify --deep --strict DropShelf.app
+          hdiutil verify DropShelf.dmg
+          git diff --exit-code
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned secret scanner
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - name: Scan all fetched Git history without printing secrets
+        run: '"$(go env GOPATH)/bin/gitleaks" git --redact --no-banner --log-opts="--all" .'
