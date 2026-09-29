@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "tools": [
+    {"name":"qpdf","path":"bin/qpdf","sha256":"d3a6a85f14155a233ed36dfd274bd2d0932301b0f7f7d69e59bcd1be7517726c","version":"12.4.2"},
+    {"name":"jpegtran","path":"bin/jpegtran","sha256":"f437f6a665e3f7915a8ceded20cb4e70a4a4718b8a216b1937a9defa0f1d9d03","version":"3.2.0"},
+    {"name":"oxipng","path":"bin/oxipng","sha256":"8af512c07d1c3b1bf7be8cffe5a89accce495adca90b76b7395309aec1b19002","version":"10.2.1"},
+    {"name":"pdf-verify","path":"bin/pdf-verify","sha256":"6dc8392cd68348ae0dd7918f2f57c1497944d53bd450c209bc847fa4e400bb72","version":"1.0.0","sourceSha256":"1382e8d2052703afa717a0c2f1992307635b187a275b6e578c96f298d40769a9"},
+    {"name":"image-verify","path":"bin/image-verify","sha256":"bb27c879df0e4559d78b494eff8221fae76e153346a76c751add627221566d6e","version":"1.0.0","sourceSha256":"ab8f1832fa3a86a0e710e0dfb96bb331d84d114f05ce88a49e9c863da60214e8"}
+  ]
+}

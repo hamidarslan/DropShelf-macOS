@@ -28,6 +28,12 @@ jobs:
         run: bash Tests/images.sh
       - name: PDF correctness tests
         run: bash Tests/pdf.sh
+      - name: Lossless compression integrity and batch tests
+        run: bash Tests/compression.sh
+      - name: Native PDF preservation tests
+        run: bash Tests/compression-pdf-native.sh
+      - name: Native image preservation tests
+        run: bash Tests/compression-images-native.sh
       - name: Operation cancellation tests
         run: bash Tests/operations.sh
       - name: Coordinator lifecycle tests
