@@ -144,11 +144,15 @@ public final class PDFProcessingService {
             try checkCancellation()
             try autoreleasepool {
                 let image = try decodedOrientedImage(at: url)
-                let pageSize = pdfPageSize(for: image.image, properties: image.properties)
+                let pageSize = pdfPageSize(for: image.image, properties: image.properties, orientation: image.orientation)
                 var mediaBox = CGRect(origin: .zero, size: pageSize)
                 context.beginPDFPage([kCGPDFContextMediaBox: Data(bytes: &mediaBox, count: MemoryLayout<CGRect>.size)] as CFDictionary)
                 context.interpolationQuality = .high
-                context.draw(image.image, in: mediaBox)
+                context.saveGState()
+                context.scaleBy(x: pageSize.width, y: pageSize.height)
+                context.concatenate(pdfImageTransform(for: image.orientation))
+                context.draw(image.image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                context.restoreGState()
                 context.endPDFPage()
             }
             progress(Double(index + 1) / Double(imageURLs.count), "Adding image \(index + 1) of \(imageURLs.count)")
@@ -235,7 +239,7 @@ public final class PDFProcessingService {
         try FileManager.default.moveItem(at: output.temporary, to: output.final)
     }
 
-    private func decodedOrientedImage(at url: URL) throws -> (image: CGImage, properties: [CFString: Any]) {
+    private func decodedOrientedImage(at url: URL) throws -> (image: CGImage, properties: [CFString: Any], orientation: Int) {
         try validateReadableFile(url)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else {
             throw PDFProcessingError.unreadableImage(url.lastPathComponent)
@@ -251,6 +255,11 @@ public final class PDFProcessingService {
             throw PDFProcessingError.multiFrameImage(url.lastPathComponent, frames: frameCount)
         }
         let properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+        if sourceIdentifier as String == "public.jpeg", let image = compactJPEGImage(from: source) {
+            let rawOrientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+            let orientation = (1...8).contains(rawOrientation) ? rawOrientation : 1
+            return (image, properties, orientation)
+        }
         let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
         let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
         let maximum = max(width, height)
@@ -263,19 +272,53 @@ public final class PDFProcessingService {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             throw PDFProcessingError.unreadableImage(url.lastPathComponent)
         }
-        return (image, properties)
+        return (image, properties, 1)
     }
 
-    private func pdfPageSize(for image: CGImage, properties: [CFString: Any]) -> CGSize {
+    private func compactJPEGImage(from source: CGImageSource) -> CGImage? {
+        // Copy the compressed image without recompression, replacing personal metadata.
+        // A JPEG-backed image lets the PDF writer retain DCT compression and full resolution.
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageDestinationMetadata: CGImageMetadataCreateMutable(),
+            kCGImageDestinationMergeMetadata: false,
+            kCGImageMetadataShouldExcludeGPS: true,
+            kCGImageMetadataShouldExcludeXMP: true
+        ]
+        guard CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil),
+              let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(jpegDataProviderSource: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
+
+    private func pdfImageTransform(for orientation: Int) -> CGAffineTransform {
+        // EXIF transforms in the PDF's bottom-left coordinate system, on a unit square.
+        switch orientation {
+        case 2: return CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 1, ty: 0)
+        case 3: return CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 1, ty: 1)
+        case 4: return CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 1)
+        case 5: return CGAffineTransform(a: 0, b: -1, c: -1, d: 0, tx: 1, ty: 1)
+        case 6: return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: 1)
+        case 7: return CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0)
+        case 8: return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 1, ty: 0)
+        default: return .identity
+        }
+    }
+
+    private func pdfPageSize(for image: CGImage, properties: [CFString: Any], orientation: Int) -> CGSize {
         func usableDPI(_ value: Any?) -> CGFloat? {
             guard let number = value as? NSNumber else { return nil }
             let dpi = CGFloat(truncating: number)
             return (36...600).contains(dpi) ? dpi : nil
         }
-        let dpiX = usableDPI(properties[kCGImagePropertyDPIWidth]) ?? 72
-        let dpiY = usableDPI(properties[kCGImagePropertyDPIHeight]) ?? 72
-        let width = min(14_400, max(1, CGFloat(image.width) * 72 / dpiX))
-        let height = min(14_400, max(1, CGFloat(image.height) * 72 / dpiY))
+        let sourceDPIX = usableDPI(properties[kCGImagePropertyDPIWidth]) ?? 72
+        let sourceDPIY = usableDPI(properties[kCGImagePropertyDPIHeight]) ?? 72
+        let dpiX = orientation >= 5 ? sourceDPIY : sourceDPIX
+        let dpiY = orientation >= 5 ? sourceDPIX : sourceDPIY
+        let pixelWidth = orientation >= 5 ? image.height : image.width
+        let pixelHeight = orientation >= 5 ? image.width : image.height
+        let width = min(14_400, max(1, CGFloat(pixelWidth) * 72 / dpiX))
+        let height = min(14_400, max(1, CGFloat(pixelHeight) * 72 / dpiY))
         return CGSize(width: width, height: height)
     }
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.4
+
+- Keep JPEG images compact in generated PDFs without reducing image quality or resolution.
+- Preserve image orientation and color profiles while excluding photo metadata from generated PDFs.
+- Correct rotated JPEG page dimensions when horizontal and vertical DPI differ.
+
 ## 1.4.3
 
 - Updated release packaging.
