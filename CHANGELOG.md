@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+
+- Add verified lossless compression for supported PDFs, JPEGs, and PNGs.
+- Offer Low, Medium, Strong, and Custom optimization effort with per-file size results.
+- Show compression availability for compatible shelf files and keep resizing separate.
+- Preserve originals and metadata, reject unsupported special formats, and publish only validated smaller copies.
+
 ## 1.4.4
 
 - Keep JPEG images compact in generated PDFs without reducing image quality or resolution.

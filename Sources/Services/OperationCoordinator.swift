@@ -42,9 +42,12 @@ public struct OperationResult {
     public var forgottenURLs: [URL] = []
     public var message: String
     public var succeeded: Bool
-    public init(generatedURLs: [URL] = [], addedURLs: [URL] = [], forgottenURLs: [URL] = [], message: String, succeeded: Bool = true) {
+    public var compressionResults: [CompressionFileResult]
+    public init(generatedURLs: [URL] = [], addedURLs: [URL] = [], forgottenURLs: [URL] = [], message: String,
+                succeeded: Bool = true, compressionResults: [CompressionFileResult] = []) {
         self.generatedURLs = generatedURLs; self.addedURLs = addedURLs
         self.forgottenURLs = forgottenURLs; self.message = message; self.succeeded = succeeded
+        self.compressionResults = compressionResults
     }
 }
 
@@ -59,6 +62,7 @@ public final class OperationCoordinator: ObservableObject {
     @Published public private(set) var lastMessage = ""
     @Published public private(set) var lastSucceeded = false
     @Published public private(set) var lastOutputURLs: [URL] = []
+    @Published public private(set) var lastCompressionResults: [CompressionFileResult] = []
     public private(set) var heldURLs: Set<URL> = []
     private var heldGeneratedURLs: Set<URL> = []
     private var context: OperationContext?
@@ -75,6 +79,7 @@ public final class OperationCoordinator: ObservableObject {
         let id = UUID()
         activeID = id; isRunning = true; isCancelling = false; isCancellable = cancellable; self.title = title
         fraction = nil; detail = "Preparing…"; lastMessage = ""; lastSucceeded = false; lastOutputURLs = []
+        lastCompressionResults = []
         heldURLs = Set(inputs.map { $0.standardizedFileURL })
         heldGeneratedURLs = Set((ShelfStore.shared.items + ShelfStore.shared.historyItems).flatMap { $0.generatedURLs }.map { $0.standardizedFileURL }).intersection(heldURLs)
         let context = OperationContext { [weak self] update in
@@ -101,6 +106,7 @@ public final class OperationCoordinator: ObservableObject {
                         ShelfStore.shared.releaseOperationFiles(Set(output.generatedURLs))
                         message = output.addedURLs.isEmpty && output.forgottenURLs.isEmpty ? "Cancelled" : output.message
                     } else {
+                        self.lastCompressionResults = output.compressionResults
                         if output.succeeded {
                             if !output.generatedURLs.isEmpty { ShelfStore.shared.addItems(from: output.generatedURLs, isGenerated: true) }
                         } else { ShelfStore.shared.releaseOperationFiles(Set(output.generatedURLs)) }
@@ -137,13 +143,18 @@ public final class OperationCoordinator: ObservableObject {
     }
 
     /// All generated media operations use a private directory, removed on failure/cancellation.
-    public static func withOutputDirectory(context: OperationContext, body: (URL) throws -> [URL]) throws -> [URL] {
+    public static func withOutputDirectory(context: OperationContext, allowEmpty: Bool = false,
+                                           body: (URL) throws -> [URL]) throws -> [URL] {
         let fm = FileManager.default
         let directory = ActionExecutor.stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         do {
             let urls = try body(directory)
             try context.checkCancellation()
+            if urls.isEmpty, allowEmpty {
+                try fm.removeItem(at: directory)
+                return []
+            }
             let lexical = directory.standardizedFileURL.path + "/"
             let resolved = directory.resolvingSymlinksInPath().path + "/"
             guard !urls.isEmpty, urls.allSatisfy({ $0.isFileURL && $0.standardizedFileURL.path.hasPrefix(lexical) && $0.resolvingSymlinksInPath().path.hasPrefix(resolved) && fm.fileExists(atPath: $0.path) }) else {

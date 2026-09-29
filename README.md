@@ -69,11 +69,13 @@ The upper toolbar hosts an interactive action grid for rapid single-click or dra
 - **AirDrop**: Triggers the native macOS sharing service anchored directly to the panel.
 - **Desktop**: Routes items directly to the Desktop directory (`~/Desktop`) with automatic numerical collision resolution.
 - **Downloads**: Routes items directly to the user Downloads directory (`~/Downloads`) with automatic collision resolution.
-- **Images**: Opens image resize, conversion and local background-removal tools. Input and output formats come from this Mac's ImageIO codecs, with explicit safeguards for transparency, animation and bit depth.
-- **PDF**: Merges PDFs, extracts or reorders pages, and creates PDFs from images.
+- **Images**: Offers verified lossless JPEG/PNG compression, separate resize and conversion controls, and local background removal. Conversion formats come from this Mac's ImageIO codecs, with safeguards for transparency, animation and bit depth.
+- **PDF**: Offers verified lossless compression, merges PDFs, extracts or reorders pages, and creates compact PDFs from JPEGs without recompressing their image data.
 - **Trash**: Safely moves items to the macOS Trash via `FileManager.default.trashItem`.
 
 Image/PDF tools create new files and preserve originals. Long operations show progress and a Cancel control. Full BiRefNet background removal requires an optional, checksum-verified 496 MB model and macOS 15 or later. Install it explicitly with **Download Model** under Preferences or **Images > Remove background**. After installation, choosing Quality uses the local model automatically. Processing never starts a download or repair. You can remove the installed model from the same controls. Apple Vision is a separate local option on macOS 14 or later and needs no download. The app and disk image do not contain model weights. See [Media tools and cancellation](docs/MEDIA_TOOLS.md) for format support, quality boundaries and cancellation behavior.
+
+**Compress losslessly** appears when compatible files are present. Low, Medium, Strong, and Custom control optimization effort, never image quality. Only validated smaller copies are added to the shelf; already-optimized or unsupported files remain unchanged. Compression preserves metadata and runs locally with bundled tools. Resize and format conversion remain separate edits and are not described as lossless.
 
 ### 4. Stack and Separation Controls
 - **Accessible Control Bar Placement**: The **Stack All / Unstack** button is positioned directly between the **Drag All** pill and **Select All** button above your items for prominent visibility and instant access.

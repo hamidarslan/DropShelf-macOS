@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "target": "arm64-apple-macos13",
+  "components": [
+    {"name":"qpdf","version":"12.4.2","source":"https://github.com/qpdf/qpdf/releases/download/v12.4.2/qpdf-12.4.2.tar.gz","sha256":"8a58af5b6141319287c1883bec8bd1bd545b7567b7fc5e6ce5d25a1c85f36397","license":"Apache-2.0","sourceAdjustment":"Removed non-license generator-attribution comments from shell completion text."},
+    {"name":"libjpeg-turbo","version":"3.2.0","source":"https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz","sha256":"6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e","license":"BSD-3-Clause AND IJG AND Zlib"},
+    {"name":"zopfli","version":"1.0.3","commit":"bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0","source":"https://github.com/google/zopfli/archive/refs/tags/zopfli-1.0.3.tar.gz","sha256":"e955a7739f71af37ef3349c4fa141c648e8775bceb2195be07e86f8e638814bd","license":"Apache-2.0"},
+    {"name":"oxipng","version":"10.2.1","source":"https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-aarch64-apple-darwin.tar.gz","sha256":"7039fcfc78e8aa1ed2b57d848057a0296f082e92b3e1807ac65402d10d926764","license":"MIT"}
+  ]
+}

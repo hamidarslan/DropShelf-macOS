@@ -10,6 +10,20 @@ Resize to a bounding width/height or a percentage, retaining the aspect ratio. E
 
 Transparency loss, bit-depth reduction, and flattening an animated or multi-page input to its first frame require explicit options. Conversion renders RAW images to pixels and does not retain editable camera sensor data. Lossy formats and resizing change image data. Exceptionally large decoded images are refused with a clear message rather than exhausting memory or silently reducing their dimensions.
 
+## Lossless compression
+
+Add PDF, JPEG, or PNG files to the shelf or tools window. Compatible files show a compression indicator, and **Compress losslessly** becomes available in the corresponding Images or PDF tab. Files excluded by the selected tab are identified before processing.
+
+Low, Medium, and Strong select optimization effort. Custom exposes PDF stream compression and object packing, PNG optimization effort, optional Zopfli search, JPEG sequential/progressive encoding trials, and a time limit. These settings never reduce image quality or resolution. Strong may take longer and does not guarantee a smaller result than another preset.
+
+Compression preserves metadata and leaves the original file untouched. Each result reports its original and resulting size, or explains why it stayed unchanged. A new file is published only after content validation and only when it is smaller. Already-compressed files may have little or no remaining lossless saving.
+
+- **PDF:** QPDF repacks PDF objects and losslessly compresses eligible streams. Validation compares logical document objects, text/vector content, forms, links, annotations, metadata, attachments, and image streams. An existing permanent document identifier is preserved; storage layout and the update identifier may change. Signed, encrypted, XFA, damaged, or unverifiable documents are left unchanged; the app does not invalidate a signature to obtain a smaller file.
+- **JPEG:** libjpeg-turbo optimizes the existing JPEG coefficient representation without decoding and re-encoding image pixels. Validation compares quantization, sampling, DCT coefficients, and metadata. Ordinary 8-bit JPEGs are supported. Multi-picture, HDR/gain-map, provenance/signed, and unsupported JPEG variants are left unchanged.
+- **PNG:** Oxipng optimizes compression without changing dimensions, bit depth, color type, interlacing, or samples. Validation includes color values hidden behind fully transparent pixels. Original non-image-data chunks are preserved. Animated, signed/provenance, damaged, and unsupported special PNGs are left unchanged.
+
+Compression helpers are bundled, checksum-verified, and run locally. They do not need Homebrew, a separate installation, or a network connection. Safety and time limits can stop unusually complex files without publishing an unverified result. Resize, conversion, background removal, and metadata removal are separate edits and are not part of the lossless compression claim.
+
 ## Background removal
 
 The quality engine uses the full BiRefNet Core ML conversion, not the smaller Lite model. It predicts a soft mask at 1024 by 1024 and applies it at the original image dimensions. Original pixel dimensions do not mean that every hair or transparent edge can be recovered perfectly. Review the output at full size. This is not a claim that BiRefNet is universally the best model or that the conversion is the separate HR-matting model.
@@ -24,7 +38,7 @@ Choosing Quality or starting background removal never downloads or repairs a mis
 - Extract or reorder pages from one PDF with an ordered list such as `3, 1, 5-8`. Repeated pages are allowed.
 - Create one PDF page per image in source order, applying image orientation.
 
-Locked, encrypted, invalid or unavailable inputs produce errors. Generated PDFs are new documents; source digital signatures are not retained or validated. Interactive behavior and document-level features may differ in newly assembled PDFs. Inspect the output before sharing.
+Locked, encrypted, invalid or unavailable inputs produce errors. Merge, extract, and images-to-PDF create newly assembled documents; source digital signatures do not transfer, and interactive or document-level features may differ. The separate lossless compression action preserves verified document content and rejects signed documents.
 
 ## Progress and cancellation
 

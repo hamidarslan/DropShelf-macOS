@@ -1,11 +1,62 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+final class CompressionEligibilityCache {
+    static let shared = CompressionEligibilityCache()
+    private struct FileFingerprint: Equatable {
+        let size: UInt64?
+        let modificationDate: Date?
+        let inode: UInt64?
+        let device: UInt64?
+    }
+    private struct Entry {
+        let fingerprint: FileFingerprint?
+        let kind: CompressionMediaKind?
+    }
+    private let lock = NSLock()
+    private var entries: [URL: Entry] = [:]
+    private let detector: (URL) -> CompressionMediaKind?
+
+    init(detector: @escaping (URL) -> CompressionMediaKind? = LosslessCompressionService.detectKind) {
+        self.detector = detector
+    }
+
+    func eligibleCount(for action: ActionType, urls: [URL]) -> Int {
+        guard action == .convertImage || action == .pdfTools else { return 0 }
+        return urls.reduce(into: 0) { count, url in
+            let kind = cachedKind(for: url)
+            if action == .pdfTools ? kind == .pdf : kind == .jpeg || kind == .png { count += 1 }
+        }
+    }
+
+    private func cachedKind(for url: URL) -> CompressionMediaKind? {
+        let key = url.standardizedFileURL.resolvingSymlinksInPath()
+        let fingerprint = Self.fingerprint(for: key)
+        lock.lock()
+        if let entry = entries[key], entry.fingerprint == fingerprint { lock.unlock(); return entry.kind }
+        lock.unlock()
+        let kind = detector(url)
+        lock.lock(); entries[key] = Entry(fingerprint: fingerprint, kind: kind); lock.unlock()
+        return kind
+    }
+
+    private static func fingerprint(for url: URL) -> FileFingerprint? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        return FileFingerprint(
+            size: (attributes[.size] as? NSNumber)?.uint64Value,
+            modificationDate: attributes[.modificationDate] as? Date,
+            inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value,
+            device: (attributes[.systemNumber] as? NSNumber)?.uint64Value
+        )
+    }
+}
+
 public struct ActionTileView: View {
     let action: ActionType
     @ObservedObject var store = ShelfStore.shared
     @State private var isHovering = false
     @State private var showSuccess = false
+    @State private var losslessCompressionCount = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var refined: Bool { store.useRefinedClassic }
     private var palette: ClassicPalette { ClassicPalette(light: isLight) }
@@ -47,6 +98,16 @@ public struct ActionTileView: View {
                                 : (refined ? actionColor : (isLight ? actionColor : Color.white.opacity(0.85)))
                             )
                     }
+
+                    if losslessCompressionCount > 0 && (action == .convertImage || action == .pdfTools) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.green)
+                            .background(Circle().fill(refined ? palette.card : (isLight ? Color.white : Color.black)).padding(-1))
+                            .offset(x: 13, y: -13)
+                            .help("Lossless compression is available for \(losslessCompressionCount) compatible file\(losslessCompressionCount == 1 ? "" : "s")")
+                            .accessibilityLabel("Lossless compression available for \(losslessCompressionCount) file\(losslessCompressionCount == 1 ? "" : "s")")
+                    }
                 }
                 .scaleEffect(reduceMotion ? 1 : (isTargeted ? 1.10 : (isHovering ? 1.04 : 1.0)))
                 .animation(.spring(response: 0.28, dampingFraction: 0.65), value: isTargeted)
@@ -68,6 +129,8 @@ public struct ActionTileView: View {
         .buttonStyle(.plain)
         .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
         .help(action.tooltip)
+        .onAppear { refreshCompressionBadge() }
+        .onChange(of: compressionSourceFingerprint) { _ in refreshCompressionBadge() }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering
@@ -84,6 +147,28 @@ public struct ActionTileView: View {
                     }
             }
         )
+    }
+
+    private var compressionSourceURLs: [URL] {
+        store.selectedItemIDs.isEmpty ? store.items.flatMap { $0.fileURLs } : store.allSelectedURLs()
+    }
+
+    private var compressionSourceFingerprint: String {
+        guard action == .convertImage || action == .pdfTools else { return "" }
+        return compressionSourceURLs.map { $0.standardizedFileURL.path }.joined(separator: "|")
+    }
+
+    private func refreshCompressionBadge() {
+        guard action == .convertImage || action == .pdfTools else { losslessCompressionCount = 0; return }
+        let urls = compressionSourceURLs
+        let fingerprint = compressionSourceFingerprint
+        DispatchQueue.global(qos: .utility).async {
+            let count = CompressionEligibilityCache.shared.eligibleCount(for: action, urls: urls)
+            DispatchQueue.main.async {
+                guard fingerprint == compressionSourceFingerprint else { return }
+                losslessCompressionCount = count
+            }
+        }
     }
 
     private var tileFill: Color {

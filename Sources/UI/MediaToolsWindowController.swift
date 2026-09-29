@@ -9,9 +9,63 @@ public final class MediaToolsModel: ObservableObject {
     @Published var urls: [URL] = []
     @Published var selection: Int? = nil
     @Published var error = ""
-    func add(_ incoming: [URL]) {
-        for url in incoming where url.isFileURL && !urls.contains(where: { $0.standardizedFileURL.resolvingSymlinksInPath() == url.standardizedFileURL.resolvingSymlinksInPath() }) { urls.append(url) }
+    @Published private(set) var compressionKinds: [URL: CompressionMediaKind] = [:]
+    private let compressionDetector: (URL) -> CompressionMediaKind?
+    private var canonicalKeys: Set<URL> = []
+    private var canonicalKeyByLexicalKey: [URL: URL] = [:]
+
+    public init(compressionDetector: @escaping (URL) -> CompressionMediaKind? = LosslessCompressionService.detectKind) {
+        self.compressionDetector = compressionDetector
     }
+
+    func add(_ incoming: [URL]) {
+        for url in incoming where url.isFileURL {
+            let lexicalKey = Self.lexicalKey(for: url)
+            let canonicalKey = lexicalKey.resolvingSymlinksInPath()
+            guard !canonicalKeys.contains(canonicalKey) else { continue }
+            urls.append(url)
+            canonicalKeys.insert(canonicalKey)
+            canonicalKeyByLexicalKey[lexicalKey] = canonicalKey
+            if let kind = compressionDetector(url) { compressionKinds[lexicalKey] = kind }
+        }
+    }
+
+    func replace(with incoming: [URL]) {
+        urls = []; selection = nil; compressionKinds = [:]
+        canonicalKeys = []; canonicalKeyByLexicalKey = [:]
+        add(incoming)
+    }
+
+    func remove(at index: Int) {
+        guard urls.indices.contains(index) else { return }
+        let lexicalKey = Self.lexicalKey(for: urls[index])
+        compressionKinds.removeValue(forKey: lexicalKey)
+        if let canonicalKey = canonicalKeyByLexicalKey.removeValue(forKey: lexicalKey) {
+            canonicalKeys.remove(canonicalKey)
+        }
+        urls.remove(at: index)
+        selection = nil
+    }
+
+    func clear() {
+        urls = []; selection = nil; compressionKinds = [:]
+        canonicalKeys = []; canonicalKeyByLexicalKey = [:]
+    }
+
+    func compressionEligibleURLs(for kind: MediaToolKind) -> [URL] {
+        urls.filter { url in
+            guard let detected = compressionKinds[Self.lexicalKey(for: url)] else { return false }
+            return kind == .pdf ? detected == .pdf : detected == .jpeg || detected == .png
+        }
+    }
+
+    func isLosslessCompressionAvailable(for kind: MediaToolKind) -> Bool {
+        !compressionEligibleURLs(for: kind).isEmpty
+    }
+
+    func compressionKind(for url: URL) -> CompressionMediaKind? { compressionKinds[Self.lexicalKey(for: url)] }
+
+    private static func lexicalKey(for url: URL) -> URL { url.standardizedFileURL }
     func move(_ delta: Int) {
         guard let index = selection, urls.indices.contains(index), urls.indices.contains(index + delta) else { return }
         urls.swapAt(index, index + delta); selection = index + delta
@@ -25,7 +79,7 @@ public final class MediaToolsWindowController: NSObject, NSWindowDelegate {
     public func show(kind: MediaToolKind, urls: [URL]) {
         if !OperationCoordinator.shared.isRunning {
             model.kind = kind
-            if window == nil || !urls.isEmpty { model.urls = []; model.add(urls); model.selection = nil }
+            if window == nil || !urls.isEmpty { model.replace(with: urls) }
             model.error = ""
         }
         if let window = window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
@@ -65,9 +119,11 @@ public struct OperationProgressView: View {
 }
 
 public struct MediaToolsView: View {
+    private static let imageEditAction = "Convert / Resize (changes pixels)"
+    private static let compressionAction = "Compress losslessly"
     @ObservedObject var model: MediaToolsModel
     @ObservedObject var operation = OperationCoordinator.shared
-    @State private var imageAction = "Convert and resize"
+    @State private var imageAction = Self.imageEditAction
     @ObservedObject private var backgroundModel = BackgroundModelStore.shared
     @State private var outputType = UTType.png.identifier
     @State private var resize = "Original size"
@@ -84,7 +140,21 @@ public struct MediaToolsView: View {
     @State private var pages = "1"
     @State private var showFormats = false
     @State private var backgroundEngine = BackgroundRemovalEngine.quality
-    private let pdfActions = ["Merge PDFs", "Extract / reorder pages", "Images to PDF"]
+    @State private var compressionPreset = CompressionPreset.medium
+    @State private var pdfCompressionLevel = 6
+    @State private var pdfRecompressStreams = true
+    @State private var pdfGenerateObjectStreams = true
+    @State private var pdfUseZopfli = false
+    @State private var pngOptimizationLevel = 3
+    @State private var pngUseZopfli = false
+    @State private var jpegTrySequential = true
+    @State private var jpegTryProgressive = true
+    @State private var compressionTimeout = 120.0
+    private var pdfActions: [String] {
+        var actions = ["Merge PDFs", "Extract / reorder pages", "Images to PDF"]
+        if model.isLosslessCompressionAvailable(for: .pdf) { actions.append(Self.compressionAction) }
+        return actions
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -107,6 +177,7 @@ public struct MediaToolsView: View {
                         imageOptions
                         if isQualityBackgroundRemoval { BackgroundModelStatusView(allowsRemoval: true) }
                     } else { pdfOptions }
+                    if !operation.lastCompressionResults.isEmpty { compressionResults }
                 }.padding(.trailing, 6)
             }
             Spacer(minLength: 0)
@@ -124,14 +195,18 @@ public struct MediaToolsView: View {
                     Button("Preview result") { QuickLookController.shared.show(result) }
                 }
                 Button("Close") { NSApp.keyWindow?.close() }.keyboardShortcut(.cancelAction)
-                Button(model.kind == .images && imageAction == "Remove background" ? "Remove background" : "Create") { run() }
+                Button(primaryButtonTitle) { run() }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(operation.isRunning || model.urls.isEmpty || (isQualityBackgroundRemoval && backgroundModel.status != .ready))
+                    .disabled(operation.isRunning || model.urls.isEmpty ||
+                              (isCompressionAction && compressionEligibleURLs.isEmpty) ||
+                              (isCompressionAction && !compressionSettingsValid) ||
+                              (isQualityBackgroundRemoval && backgroundModel.status != .ready))
                     .help(isQualityBackgroundRemoval && backgroundModel.status != .ready ? "Download and install the Quality model first." : "Process the source files")
             }
         }.padding(22).frame(width: 600, height: 710)
         .background(Color(nsColor: .windowBackgroundColor))
         .tint(.blue)
+        .onChange(of: compressionEligibilityFingerprint) { _ in clearStaleCompressionActionIfNeeded() }
     }
 
     private var isQualityBackgroundRemoval: Bool {
@@ -142,9 +217,14 @@ public struct MediaToolsView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("\(model.urls.count) source file\(model.urls.count == 1 ? "" : "s")").font(.headline)
+                if model.isLosslessCompressionAvailable(for: model.kind) {
+                    Label("Lossless available for \(compressionEligibleURLs.count)", systemImage: "arrow.down.circle.fill")
+                        .font(.caption).foregroundColor(.green)
+                        .help("Open the Action menu to compress compatible files without changing verified content or metadata.")
+                }
                 Spacer()
                 Button("Add files…", action: chooseFiles)
-                Button("Clear") { model.urls = []; model.selection = nil }.disabled(model.urls.isEmpty)
+                Button("Clear") { model.clear() }.disabled(model.urls.isEmpty)
             }
             List(selection: $model.selection) {
                 ForEach(Array(model.urls.enumerated()), id: \.offset) { index, url in
@@ -153,13 +233,22 @@ public struct MediaToolsView: View {
                         Image(systemName: url.pathExtension.lowercased() == "pdf" ? "doc.richtext" : "photo")
                         Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
                         Spacer()
+                        if isCompressionAction {
+                            if compressionEligibleURLs.contains(where: { $0.standardizedFileURL == url.standardizedFileURL }) {
+                                Label(model.compressionKind(for: url)?.title ?? "Lossless", systemImage: "checkmark.shield")
+                                    .font(.caption2).foregroundColor(.green)
+                            } else {
+                                Label("Excluded", systemImage: "minus.circle")
+                                    .font(.caption2).foregroundColor(.orange)
+                            }
+                        }
                     }.tag(index).help(url.path)
                 }
             }.frame(height: 118).cornerRadius(8)
             HStack {
                 Button { model.move(-1) } label: { Image(systemName: "arrow.up") }.help("Move selected source earlier")
                 Button { model.move(1) } label: { Image(systemName: "arrow.down") }.help("Move selected source later")
-                Button("Remove selected") { if let index = model.selection, model.urls.indices.contains(index) { model.urls.remove(at: index); model.selection = nil } }
+                Button("Remove selected") { if let index = model.selection { model.remove(at: index) } }
                     .disabled(model.selection == nil)
                 Spacer()
                 Text("Order shown is output order").font(.caption).foregroundColor(.secondary)
@@ -170,10 +259,13 @@ public struct MediaToolsView: View {
     private var imageOptions: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Action", selection: $imageAction) {
-                Text("Convert and resize").tag("Convert and resize")
+                Text(Self.imageEditAction).tag(Self.imageEditAction)
+                if model.isLosslessCompressionAvailable(for: .images) { Text(Self.compressionAction).tag(Self.compressionAction) }
                 Text("Remove background").tag("Remove background")
             }
-            if imageAction == "Remove background" {
+            if imageAction == Self.compressionAction {
+                compressionOptions
+            } else if imageAction == "Remove background" {
                 Picker("Model", selection: $backgroundEngine) {
                     ForEach(BackgroundRemovalEngine.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -181,6 +273,8 @@ public struct MediaToolsView: View {
                 Text("Exports a transparent PNG at the original pixel dimensions. Review fine hair, glass and shadows before using the result.")
                     .font(.caption).foregroundColor(.secondary)
             } else {
+                Text("Resize is a separate pixel edit. Changing dimensions or format can change image data and file quality.")
+                    .font(.caption).foregroundColor(.secondary)
                 Picker("Output format", selection: $outputType) {
                     ForEach(ImageProcessingService.supportedOutputFormats, id: \.identifier) { format in
                         Text("\(format.name) (.\(format.fileExtension))").tag(format.identifier)
@@ -223,7 +317,9 @@ public struct MediaToolsView: View {
     private var pdfOptions: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Action", selection: $pdfAction) { ForEach(pdfActions, id: \.self) { Text($0) } }
-            if pdfAction == "Extract / reorder pages" {
+            if pdfAction == Self.compressionAction {
+                compressionOptions
+            } else if pdfAction == "Extract / reorder pages" {
                 TextField("Page order, for example 3, 1, 5-8", text: $pages)
                 Text("Choose one PDF. Page numbers start at 1; repeated pages are allowed.").font(.caption).foregroundColor(.secondary)
             } else if pdfAction == "Merge PDFs" {
@@ -231,9 +327,126 @@ public struct MediaToolsView: View {
             } else {
                 Text("Creates one PDF page per image, in source order. Animated images must be converted to a still image first.").font(.caption).foregroundColor(.secondary)
             }
-            Text("Creates a new PDF. Existing digital signatures do not transfer to the new document. Locked PDFs must be unlocked in another app first.")
-                .font(.caption).foregroundColor(.secondary)
+            if pdfAction != Self.compressionAction {
+                Text("Creates a new PDF. Existing digital signatures do not transfer to the new document. Locked PDFs must be unlocked in another app first.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
         }.disabled(operation.isRunning)
+    }
+
+    private var isCompressionAction: Bool {
+        model.kind == .images ? imageAction == Self.compressionAction : pdfAction == Self.compressionAction
+    }
+
+    private var compressionEligibleURLs: [URL] { model.compressionEligibleURLs(for: model.kind) }
+    private var excludedCompressionCount: Int { max(0, model.urls.count - compressionEligibleURLs.count) }
+    private var compressionEligibilityFingerprint: String {
+        "\(model.kind.rawValue)|\(compressionEligibleURLs.map(\.path).joined(separator: "|"))"
+    }
+
+    private var primaryButtonTitle: String {
+        if isCompressionAction { return "Compress losslessly" }
+        if model.kind == .images && imageAction == "Remove background" { return "Remove background" }
+        return "Create"
+    }
+
+    private var compressionOptions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Effort", selection: $compressionPreset) {
+                ForEach(CompressionPreset.allCases) { preset in Text(preset.title).tag(preset) }
+            }
+            Text("Effort controls how long DropShelf searches for a smaller representation. It never lowers quality, and a smaller file is not guaranteed.")
+                .font(.caption).foregroundColor(.secondary)
+            Label("\(compressionEligibleURLs.count) compatible \(model.kind == .pdf ? "PDF" : "JPEG/PNG") file\(compressionEligibleURLs.count == 1 ? "" : "s")",
+                  systemImage: compressionEligibleURLs.isEmpty ? "exclamationmark.circle" : "checkmark.shield")
+                .font(.caption).foregroundColor(compressionEligibleURLs.isEmpty ? .orange : .green)
+            if excludedCompressionCount > 0 {
+                Text("\(excludedCompressionCount) source file\(excludedCompressionCount == 1 ? " is" : "s are") excluded because this tab accepts only \(model.kind == .pdf ? "PDF" : "JPEG and PNG") compression inputs. Nothing is silently converted.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            if compressionPreset == .custom { customCompressionOptions }
+            if !compressionSettingsValid {
+                Text("Choose valid custom values and at least one JPEG layout.")
+                    .font(.caption).foregroundColor(.red)
+            }
+        }
+    }
+
+    @ViewBuilder private var customCompressionOptions: some View {
+        if model.kind == .pdf {
+            Stepper("PDF stream level: \(pdfCompressionLevel)", value: $pdfCompressionLevel, in: 1...9)
+            Toggle("Recompress eligible PDF streams", isOn: $pdfRecompressStreams)
+            Toggle("Generate PDF object streams", isOn: $pdfGenerateObjectStreams)
+            Toggle("Use Zopfli stream search", isOn: $pdfUseZopfli)
+        } else {
+            Stepper("PNG search effort: \(pngOptimizationLevel)", value: $pngOptimizationLevel, in: 0...6)
+            Toggle("Use Zopfli for PNG candidates", isOn: $pngUseZopfli)
+            Toggle("Try sequential JPEG layout", isOn: $jpegTrySequential)
+            Toggle("Try progressive JPEG layout", isOn: $jpegTryProgressive)
+        }
+        HStack {
+            Text("Time limit")
+            TextField("Seconds", value: $compressionTimeout, format: .number).frame(width: 80)
+            Text("seconds").foregroundColor(.secondary)
+        }
+    }
+
+    private var compressionResults: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Lossless compression results").font(.headline)
+            LazyVStack(alignment: .leading, spacing: 7) {
+                ForEach(operation.lastCompressionResults) { result in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: result.disposition == .compressed ? "checkmark.circle.fill" :
+                                (result.disposition == .unchanged ? "equal.circle.fill" : "xmark.octagon.fill"))
+                            .foregroundColor(result.disposition == .compressed ? .green :
+                                                (result.disposition == .unchanged ? .secondary : .orange))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.inputURL.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                            if result.disposition == .compressed, let resultBytes = result.resultBytes {
+                                Text("\(Self.byteCount(result.originalBytes)) → \(Self.byteCount(resultBytes)), saved \(result.savingsPercent, specifier: "%.1f")%")
+                                    .font(.caption).monospacedDigit()
+                            } else {
+                                Text("\(Self.byteCount(result.originalBytes)) · \(result.disposition == .unchanged ? "Unchanged" : "Not compressed")")
+                                    .font(.caption).monospacedDigit()
+                            }
+                            Text(result.detail).font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }.padding(10).background(RoundedRectangle(cornerRadius: 9).fill(Color.secondary.opacity(0.08)))
+    }
+
+    private static func byteCount(_ count: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
+    }
+
+    private func clearStaleCompressionActionIfNeeded() {
+        guard compressionEligibleURLs.isEmpty else { return }
+        if imageAction == Self.compressionAction { imageAction = Self.imageEditAction }
+        if pdfAction == Self.compressionAction { pdfAction = "Merge PDFs" }
+    }
+
+    private var currentCompressionOptions: LosslessCompressionOptions {
+        var options = LosslessCompressionOptions()
+        options.preset = compressionPreset
+        options.pdfCompressionLevel = pdfCompressionLevel
+        options.pdfRecompressStreams = pdfRecompressStreams
+        options.pdfGenerateObjectStreams = pdfGenerateObjectStreams
+        options.pdfUseZopfli = pdfUseZopfli
+        options.pngOptimizationLevel = pngOptimizationLevel
+        options.pngUseZopfli = pngUseZopfli
+        options.jpegTrySequential = jpegTrySequential
+        options.jpegTryProgressive = jpegTryProgressive
+        options.timeoutSeconds = compressionTimeout
+        return options
+    }
+
+    private var compressionSettingsValid: Bool {
+        guard let options = try? currentCompressionOptions.resolved() else { return false }
+        let includesJPEG = model.kind == .images && compressionEligibleURLs.contains { model.compressionKind(for: $0) == .jpeg }
+        return !includesJPEG || options.jpegTrySequential || options.jpegTryProgressive
     }
 
     private func chooseFiles() {
@@ -271,7 +484,29 @@ public struct MediaToolsView: View {
         model.error = ""
         let urls = model.urls
         do {
-            if model.kind == .images && imageAction == "Remove background" {
+            if isCompressionAction {
+                let eligible = compressionEligibleURLs
+                guard !eligible.isEmpty else { throw Self.toolError("Add a compatible \(model.kind == .pdf ? "PDF" : "JPEG or PNG") file to compress.") }
+                let options = currentCompressionOptions
+                _ = try options.resolved()
+                let excluded = excludedCompressionCount
+                operation.start(title: "Lossless compression", inputs: eligible) { context in
+                    var batchResult: CompressionBatchResult?
+                    let outputs = try OperationCoordinator.withOutputDirectory(context: context, allowEmpty: true) { directory in
+                        let batch = try LosslessCompressionService.compress(
+                            urls: eligible, options: options, outputDirectory: directory,
+                            checkCancellation: context.checkCancellation,
+                            progress: { context.progress($0, $1) }
+                        )
+                        batchResult = batch
+                        return batch.generatedURLs
+                    }
+                    guard let batch = batchResult else { throw Self.toolError("Compression did not return a result.") }
+                    let exclusionMessage = excluded > 0 ? " \(excluded) incompatible source file\(excluded == 1 ? " was" : "s were") excluded." : ""
+                    return OperationResult(generatedURLs: outputs, message: batch.message + exclusionMessage,
+                                           succeeded: batch.succeeded, compressionResults: batch.files)
+                }
+            } else if model.kind == .images && imageAction == "Remove background" {
                 let engine = backgroundEngine
                 try BackgroundRemovalService.validateAvailability(engine: engine)
                 operation.start(title: "Remove background", inputs: urls) { context in

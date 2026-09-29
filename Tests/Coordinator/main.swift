@@ -37,6 +37,87 @@ shelf.historyItems = []
 check(Thread.isMainThread, "coordinator tests run on the main thread")
 check(!coordinator.isRunning, "coordinator begins idle")
 
+var classifiedURLs: [URL] = []
+let mediaModel = MediaToolsModel(compressionDetector: { url in
+    classifiedURLs.append(url)
+    switch url.pathExtension.lowercased() {
+    case "pdf": return .pdf
+    case "jpg": return .jpeg
+    case "png": return .png
+    default: return nil
+    }
+})
+let cachedPDF = URL(fileURLWithPath: "/tmp/compression-cache.pdf")
+let cachedJPEG = URL(fileURLWithPath: "/tmp/compression-cache.jpg")
+let unsupported = URL(fileURLWithPath: "/tmp/compression-cache.tiff")
+mediaModel.add([cachedPDF, cachedJPEG, unsupported])
+check(mediaModel.compressionEligibleURLs(for: .pdf) == [cachedPDF],
+      "PDF compression eligibility uses cached content classification")
+check(mediaModel.compressionEligibleURLs(for: .images) == [cachedJPEG],
+      "image compression eligibility uses cached content classification")
+check(mediaModel.isLosslessCompressionAvailable(for: .images),
+      "compression action availability follows eligible image inputs")
+_ = mediaModel.compressionEligibleURLs(for: .images)
+check(classifiedURLs.count == 3, "reading compression eligibility performs no repeated classification")
+mediaModel.remove(at: 1)
+check(mediaModel.compressionEligibleURLs(for: .images).isEmpty,
+      "removing an input clears its cached compression eligibility")
+mediaModel.clear()
+check(mediaModel.urls.isEmpty && mediaModel.compressionEligibleURLs(for: .pdf).isEmpty,
+      "clearing inputs clears cached compression eligibility")
+check(!mediaModel.isLosslessCompressionAvailable(for: .pdf),
+      "compression action is unavailable when no eligible input remains")
+
+let aliasRoot = FileManager.default.temporaryDirectory.appendingPathComponent("dropshelf-model-alias-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: aliasRoot, withIntermediateDirectories: false)
+defer { try? FileManager.default.removeItem(at: aliasRoot) }
+let aliasTarget = aliasRoot.appendingPathComponent("target.pdf")
+let aliasURL = aliasRoot.appendingPathComponent("alias.pdf")
+try Data("%PDF-1.7".utf8).write(to: aliasTarget)
+try FileManager.default.createSymbolicLink(at: aliasURL, withDestinationURL: aliasTarget)
+let aliasModel = MediaToolsModel(compressionDetector: { _ in .pdf })
+aliasModel.add([aliasURL])
+try FileManager.default.removeItem(at: aliasURL)
+check(aliasModel.compressionEligibleURLs(for: .pdf) == [aliasURL],
+      "render-time compression eligibility uses cached lexical keys without filesystem resolution")
+
+var badgeDetectionCount = 0
+let badgeCache = CompressionEligibilityCache(detector: { url in
+    badgeDetectionCount += 1
+    return url.pathExtension.lowercased() == "pdf" ? .pdf : nil
+})
+check(badgeCache.eligibleCount(for: .pdfTools, urls: [cachedPDF, unsupported]) == 1,
+      "PDF action badge counts compatible content")
+check(badgeCache.eligibleCount(for: .pdfTools, urls: [cachedPDF, unsupported]) == 1 && badgeDetectionCount == 2,
+      "action badge reuses cached content classification including unsupported files")
+check(badgeCache.eligibleCount(for: .convertImage, urls: [cachedPDF]) == 0,
+      "image action badge excludes PDF content")
+
+let replacementRoot = FileManager.default.temporaryDirectory.appendingPathComponent("dropshelf-badge-replacement-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: replacementRoot, withIntermediateDirectories: false)
+defer { try? FileManager.default.removeItem(at: replacementRoot) }
+let replacementURL = replacementRoot.appendingPathComponent("same-path.bin")
+try Data("%PDF-1.7".utf8).write(to: replacementURL)
+let replacementCache = CompressionEligibilityCache(detector: LosslessCompressionService.detectKind)
+check(replacementCache.eligibleCount(for: .pdfTools, urls: [replacementURL]) == 1,
+      "badge cache classifies initial same-path PDF content")
+try FileManager.default.removeItem(at: replacementURL)
+try Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).write(to: replacementURL)
+check(replacementCache.eligibleCount(for: .convertImage, urls: [replacementURL]) == 1,
+      "badge cache invalidates when the file at the same path is replaced")
+
+let compressionInput = FileManager.default.temporaryDirectory.appendingPathComponent("compression-input.pdf")
+let compressionFileResult = CompressionFileResult(
+    inputURL: compressionInput, outputURL: nil, originalBytes: 1_024, resultBytes: nil,
+    disposition: .unchanged, detail: "Already optimal"
+)
+let compressionOperationResult = OperationResult(
+    message: "1 unchanged. Originals kept.", succeeded: true,
+    compressionResults: [compressionFileResult]
+)
+check(compressionOperationResult.compressionResults.count == 1,
+      "operation results carry per-file compression diagnostics")
+
 // A running operation owns the single execution slot. Both accepted and rejected
 // completions are delivered exactly once on the main thread.
 let firstStarted = DispatchSemaphore(value: 0)
@@ -191,11 +272,35 @@ expectInvalidPrivateOutput("outside output is rejected") { _ in [outsideFile] }
 expectInvalidPrivateOutput("missing output is rejected") { directory in
     [directory.appendingPathComponent("missing.txt")]
 }
+expectInvalidPrivateOutput("empty output is rejected by default") { _ in [] }
 expectInvalidPrivateOutput("escaped symlink output is rejected") { directory in
     let link = directory.appendingPathComponent("escape.txt")
     try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outsideFile)
     return [link]
 }
+
+var allowedEmptyDirectory: URL?
+let allowedEmpty = try OperationCoordinator.withOutputDirectory(context: OperationContext(), allowEmpty: true) { directory in
+    allowedEmptyDirectory = directory
+    return []
+}
+check(allowedEmpty.isEmpty, "explicitly allowed empty private output succeeds")
+check(allowedEmptyDirectory.map { !FileManager.default.fileExists(atPath: $0.path) } == true,
+      "empty private output directory is removed")
+
+var compressionCallback = false
+check(coordinator.start(title: "Compression diagnostics", inputs: []) { _ in
+    compressionOperationResult
+} completion: { success, _ in
+    compressionCallback = true
+    check(success, "compression diagnostics operation succeeds")
+}, "compression diagnostics operation starts")
+check(coordinator.lastCompressionResults.isEmpty,
+      "starting an operation clears stale compression diagnostics")
+waitUntil("compression diagnostics completion runs") { compressionCallback && !coordinator.isRunning }
+check(coordinator.lastCompressionResults.count == 1 &&
+      coordinator.lastCompressionResults[0].detail == "Already optimal",
+      "coordinator publishes per-file compression diagnostics")
 
 // A successful result becomes the last result and its callback is delivered once.
 var successCallbacks = 0
