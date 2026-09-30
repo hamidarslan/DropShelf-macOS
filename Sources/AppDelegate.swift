@@ -2,11 +2,13 @@ import Cocoa
 import SwiftUI
 import Combine
 
+@MainActor
 public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panelController: FloatingPanelController!
     private var hotKeyMonitor: Any?
     private var statusIconObservation: AnyCancellable?
+    private var organizerObservation: AnyCancellable?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // Clean up any stale staging artifacts from prior runs
@@ -17,6 +19,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up Menu Bar Status Item
         setupStatusItem()
+        MenuBarOrganizerController.shared.configure(anchor: statusItem) {
+            PreferencesWindowController.shared.showMenuBar()
+        }
 
         ClipboardStore.shared.start()
 
@@ -205,6 +210,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        MenuBarOrganizerController.shared.shutdown()
+        organizerObservation?.cancel()
+        statusIconObservation?.cancel()
         GlobalDragMonitor.shared.stop()
         ClipboardStore.shared.stop()
         ClipboardDetailWindowController.shared.close()
@@ -215,8 +223,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         ActionExecutor.purgeStagingDirectory()
     }
 
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if MenuBarOrganizerController.shared.enabled {
+            MenuBarOrganizerController.shared.reveal()
+            PreferencesWindowController.shared.showMenuBar()
+        } else {
+            panelController?.show()
+        }
+        return true
+    }
+
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.autosaveName = "DropShelf.Main"
 
         if let button = statusItem.button {
             button.image = BrandAssets.menuBar(isDragging: false)
@@ -233,12 +252,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] isDragging in
                 self?.statusItem.button?.image = BrandAssets.menuBar(isDragging: isDragging)
             }
+        organizerObservation = MenuBarOrganizerController.shared.$enabled
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                self?.statusItem.button?.toolTip = enabled
+                    ? "DropShelf · Click for shelf · Option-click for menu bar icons · Right-click for controls"
+                    : "DropShelf · Click for shelf · Right-click for controls"
+            }
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp {
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
             showContextMenu()
+        } else if event?.modifierFlags.contains(.option) == true, MenuBarOrganizerController.shared.enabled {
+            MenuBarOrganizerController.shared.toggleHiddenItems()
         } else {
             panelController.toggleFromMenuBar()
         }
@@ -256,6 +284,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // 1. Shelf Visibility & Operations
         let showItem = NSMenuItem(title: "Toggle Shelf", action: #selector(toggleShelf), keyEquivalent: "")
         menu.addItem(showItem)
+
+        menu.addItem(.separator())
+        for item in MenuBarOrganizerController.shared.makeContextMenuItems() {
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
 
         if !ShelfStore.shared.items.isEmpty {
             if ShelfStore.shared.isCollapsed {
@@ -374,6 +408,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit DropShelf", action: #selector(quitApp), keyEquivalent: "q"))
 
+        MenuBarOrganizerController.shared.setMenuOpen(true)
+        defer { MenuBarOrganizerController.shared.setMenuOpen(false) }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         // Reset so subsequent clicks toggle panel directly

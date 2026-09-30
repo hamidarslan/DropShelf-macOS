@@ -5,7 +5,7 @@
 <h1 align="center">DropShelf</h1>
 
 <p align="center">
-  A high-performance, native macOS utility designed to streamline drag-and-drop file organization, staging, and batch processing.
+  A native macOS shelf for files, clipboard, media tools, and an optional menu bar organizer.
 </p>
 
 <p align="center">
@@ -14,9 +14,9 @@
 
 ## See it in action
 
-Start dragging a file and DropShelf appears. No shake needed.
+Start dragging a file and DropShelf appears. Keep files, clipboard, image/PDF tools, and menu bar controls together in one app.
 
-![Animated demonstration of dragging a file and DropShelf appearing immediately](docs/media/dropshelf-drag-demo.gif)
+![DropShelf overview showing instant file dragging, clipboard, media tools, and menu bar organization](docs/media/dropshelf-drag-demo.gif)
 
 ---
 
@@ -36,6 +36,23 @@ DropShelf combines low-level macOS system APIs with modern declarative user inte
 DropShelf performs local file processing without an analytics client. The build enables Hardened Runtime with ad-hoc signing; App Sandbox and notarization are not enabled. AirDrop and opening browser links can use network services. The optional BiRefNet model uses the network only when you press **Download Model** in Preferences or Image Tools. Image and PDF processing is local; source images are not uploaded. See [SECURITY.md](SECURITY.md) for the actual protections and limitations.
 
 ---
+
+## Menu bar organizer
+
+Open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switch is remembered: while enabled, the organizer starts whenever DropShelf runs. Turning it off removes its divider, reveal controls, timers, and shortcut while keeping your preferences for next time.
+
+The setup guide reveals your icons while you arrange them. Hold Command and drag less-used icons to the left of the divider; keep DropShelf and essential icons on its right. Complete setup to resume automatic hiding. The organizer changes space in the actual macOS menu bar; it does not copy other apps' icons into the shelf.
+
+On macOS 27, a small **Show icons** tab appears below the menu bar whenever icons are hidden. It lives in a separate app window, so menu-bar overflow cannot swallow it along with the icons. Click the tab to restore everything. Setup asks you to check hiding and restoring before automatic hiding starts. Changing displays or the separate reveal button can require this check again; the organizer remains enabled while waiting.
+
+- Click DropShelf normally to toggle the shelf. Option-click toggles hidden menu bar icons while the organizer is enabled.
+- Right-click for organizer controls, pauses, and settings. A separate reveal button is optional.
+- The organizer shortcut defaults to **Control + Option + H** and can be changed or disabled. The shelf keeps **Command + Shift + Y**.
+- Choose an auto-hide delay of 5, 10, 15, 30, or 60 seconds. Hiding waits while you use the menu bar, hold a mouse button, or arrange icons.
+- Keep icons visible for 5 minutes, 1 hour, or until resumed. A temporary reveal or pause does not turn the organizer off.
+- Reopen DropShelf from Applications to reveal icons and recover the organizer settings. Quitting removes its status items without forgetting the enabled setting.
+
+The organizer runs locally and adds no Accessibility, Screen Recording, or Input Monitoring permission. It uses DropShelf's existing login setting. Menu-bar space, system-owned icons, and notched or multiple displays remain subject to macOS layout rules. If another menu bar organizer is running, use one organizer at a time and choose a free shortcut.
 
 ## Clipboard history
 

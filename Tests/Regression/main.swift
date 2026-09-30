@@ -273,15 +273,17 @@ store.items = [ShelfItem.from(urls: [original]), ShelfItem.from(urls: [second]),
 store.combineAllIntoStack(); drain()
 check(store.items.contains { $0.id == text.id }, "Stack all preserves non-file content")
 check(store.items.contains { $0.id == locked.id && $0.isLocked }, "Stack all preserves pinned items")
-let delegate = AppDelegate()
-delegate.handleIncomingURL(URL(string: "dropshelf://unstack")!); drain()
-let separatedCount = store.items.count
-delegate.handleIncomingURL(URL(string: "dropshelf://unstack")!); drain()
-check(store.items.count == separatedCount, "Repeated unstack is idempotent")
-delegate.handleIncomingURL(URL(string: "dropshelf://stack")!); drain()
-let stackedCount = store.items.count
-delegate.handleIncomingURL(URL(string: "dropshelf://stack")!); drain()
-check(store.items.count == stackedCount && store.items.contains { $0.isStack }, "Repeated stack is idempotent")
+MainActor.assumeIsolated {
+    let delegate = AppDelegate()
+    delegate.handleIncomingURL(URL(string: "dropshelf://unstack")!); drain()
+    let separatedCount = store.items.count
+    delegate.handleIncomingURL(URL(string: "dropshelf://unstack")!); drain()
+    check(store.items.count == separatedCount, "Repeated unstack is idempotent")
+    delegate.handleIncomingURL(URL(string: "dropshelf://stack")!); drain()
+    let stackedCount = store.items.count
+    delegate.handleIncomingURL(URL(string: "dropshelf://stack")!); drain()
+    check(store.items.count == stackedCount && store.items.contains { $0.isStack }, "Repeated stack is idempotent")
+}
 store.items = [ShelfItem.combining([ShelfItem.from(urls: [original]), ShelfItem.from(urls: [second])])]
 store.forgetFiles([original])
 check(store.items.flatMap { $0.fileURLs } == [second], "Partial action retains unprocessed stack member")

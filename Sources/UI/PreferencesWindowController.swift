@@ -1,32 +1,36 @@
 import Cocoa
 import SwiftUI
 
-public class PreferencesWindowController: NSObject, NSWindowDelegate {
+@MainActor public class PreferencesWindowController: NSObject, NSWindowDelegate {
     public static let shared = PreferencesWindowController()
     private var window: NSWindow?
+    private let navigation = PreferencesNavigation()
 
     public func show() {
+        present(section: .general)
+    }
+
+    public func showMenuBar() {
+        present(section: .menuBar)
+    }
+
+    private func present(section: PreferencesSection) {
+        navigation.selection = section
         if let win = window {
             win.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let settingsView = SettingsView(onDismiss: { [weak self] in
-            self?.window?.close()
-        })
-
-        let hostingView = NSHostingView(rootView: settingsView)
+        let hostingView = NSHostingView(rootView: PreferencesRootView(navigation: navigation))
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 500),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 700),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        win.title = "DropShelf Preferences"
-        win.titleVisibility = .hidden
-        win.titlebarAppearsTransparent = true
-        win.isMovableByWindowBackground = true
+        win.title = "DropShelf Settings"
+        win.isMovableByWindowBackground = false
         win.contentView = hostingView
         win.center()
         win.isReleasedWhenClosed = false
@@ -38,6 +42,8 @@ public class PreferencesWindowController: NSObject, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
+        MenuBarOrganizerController.shared.endArranging()
+        MenuBarOrganizerController.shared.cancelShortcutRecording()
         window = nil
     }
 }

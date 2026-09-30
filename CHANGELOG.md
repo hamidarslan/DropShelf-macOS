@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0
+
+- Add an optional menu bar organizer with an on/off preference that persists across launches.
+- Keep organizer controls together in Preferences, with guided setup, automatic hiding, temporary pauses, a configurable shortcut, and an optional reveal button.
+- Provide a separate Show icons recovery tab on macOS 27 so menu-bar overflow does not remove the reveal control.
+- Preserve the compact file shelf and its existing click, drag, clipboard, image, and PDF workflows.
+- Refresh the feature demonstration with file, clipboard, media, and menu bar highlights.
+
 ## 1.5.2
 
 - Compare multiple lossless PDF encodings in Strong mode and keep the smallest verified copy.
