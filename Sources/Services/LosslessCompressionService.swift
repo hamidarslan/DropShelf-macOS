@@ -72,16 +72,16 @@ public final class LosslessCompressionService {
                 let verifier = kind == .pdf ? "pdf-verify" : "image-verify"
                 try verify(verifier, arguments: ["inspect", snapshot.path], work: work, deadline: deadline, checkCancellation: checkCancellation)
                 progress(Double(index) / Double(urls.count), "Optimizing \(url.lastPathComponent)")
-                let candidates = try candidates(for: snapshot, kind: kind, options: options, work: work, deadline: deadline,
-                                                checkCancellation: checkCancellation)
                 var best: URL?
                 var bestSize = originalBytes
-                for candidate in candidates {
+                try candidates(for: snapshot, kind: kind, options: options, work: work, deadline: deadline,
+                               checkCancellation: checkCancellation,
+                               progress: { detail in progress(Double(index) / Double(urls.count), detail) }) { candidate, candidateDeadline in
                     try checkCancellation()
                     let bytes = Self.size(candidate)
-                    guard bytes > 0, bytes < bestSize else { continue }
+                    guard bytes > 0, bytes < bestSize else { return }
                     progress(Double(index) / Double(urls.count), "Verifying lossless content in \(url.lastPathComponent)")
-                    try verify(verifier, arguments: ["compare", snapshot.path, candidate.path], work: work, deadline: deadline,
+                    try verify(verifier, arguments: ["compare", snapshot.path, candidate.path], work: work, deadline: candidateDeadline,
                                checkCancellation: checkCancellation)
                     best = candidate
                     bestSize = bytes
@@ -125,24 +125,45 @@ public final class LosslessCompressionService {
     }
 
     private func candidates(for input: URL, kind: CompressionMediaKind, options: LosslessCompressionOptions,
-                            work: URL, deadline: TimeInterval, checkCancellation: () throws -> Void) throws -> [URL] {
+                            work: URL, deadline: TimeInterval, checkCancellation: () throws -> Void,
+                            progress: (String) -> Void, accept: (URL, TimeInterval) throws -> Void) throws {
         switch kind {
         case .pdf:
-            let output = work.appendingPathComponent("candidate.pdf")
-            var arguments = ["--suppress-recovery", "--compress-streams=y", "--decode-level=generalized",
-                             "--preserve-unreferenced", "--remove-unreferenced-resources=no", "--newline-before-endstream",
-                             "--object-streams=\(options.pdfGenerateObjectStreams ? "generate" : "preserve")",
-                             "--compression-level=\(options.pdfCompressionLevel)"]
-            if options.pdfRecompressStreams { arguments.append("--recompress-flate") }
-            arguments += [input.path, output.path]
-            try tools.run("qpdf", arguments: arguments, work: work, deadline: deadline, zopfli: options.pdfUseZopfli,
-                          checkCancellation: checkCancellation)
-            return [output]
+            func create(_ name: String, recompress: Bool, limit: TimeInterval) throws {
+                let output = work.appendingPathComponent("\(name).pdf")
+                var arguments = ["--suppress-recovery", "--compress-streams=y", "--decode-level=generalized",
+                                 "--preserve-unreferenced", "--remove-unreferenced-resources=no", "--newline-before-endstream",
+                                 "--object-streams=\(options.pdfGenerateObjectStreams ? "generate" : "preserve")",
+                                 "--compression-level=\(options.pdfCompressionLevel)"]
+                if recompress { arguments.append("--recompress-flate") }
+                arguments += [input.path, output.path]
+                try tools.run("qpdf", arguments: arguments, work: work, deadline: limit, zopfli: options.pdfUseZopfli,
+                              checkCancellation: checkCancellation)
+                try accept(output, limit)
+            }
+            let strong = options.preset == .strong
+            if strong { progress("Optimizing PDF (1 of 2)") }
+            try create("candidate", recompress: options.pdfRecompressStreams, limit: deadline)
+            guard strong else { return }
+
+            // Reserve time for the final source-integrity check after optional search.
+            let searchDeadline = deadline - min(10, max(1, options.timeoutSeconds * 0.1))
+            try checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < searchDeadline else { return }
+            progress("Optimizing PDF (2 of 2)")
+            do {
+                try create("preserved", recompress: false, limit: searchDeadline)
+            } catch LosslessCompressionError.timedOut {
+                // Earlier candidates have already passed full preservation verification.
+                return
+            } catch LosslessCompressionError.helperFailed {
+                // A failed optional encoding cannot replace an independently verified copy.
+                return
+            }
         case .jpeg:
             guard options.jpegTrySequential || options.jpegTryProgressive else {
                 throw LosslessCompressionError.helperFailed("Choose at least one JPEG optimization method.")
             }
-            var outputs: [URL] = []
             let modes = [(options.jpegTrySequential, "sequential", "-optimize"),
                          (options.jpegTryProgressive, "progressive", "-progressive")]
             for (enabled, name, flag) in modes where enabled {
@@ -150,9 +171,8 @@ public final class LosslessCompressionService {
                 try tools.run("jpegtran", arguments: ["-copy", "all", "-strict", "-maxscans", "100", "-maxmemory", "262144",
                                                       flag, "-outfile", output.path, input.path],
                               work: work, deadline: deadline, checkCancellation: checkCancellation)
-                outputs.append(output)
+                try accept(output, deadline)
             }
-            return outputs
         case .png:
             let optimized = work.appendingPathComponent("optimized.png")
             let output = work.appendingPathComponent("candidate.png")
@@ -163,7 +183,7 @@ public final class LosslessCompressionService {
             try tools.run("oxipng", arguments: arguments, work: work, deadline: deadline, checkCancellation: checkCancellation)
             try verify("image-verify", arguments: ["restore-png", input.path, optimized.path, output.path],
                        work: work, deadline: deadline, checkCancellation: checkCancellation)
-            return [output]
+            try accept(output, deadline)
         }
     }
 

@@ -77,6 +77,8 @@ Image/PDF tools create new files and preserve originals. Long operations show pr
 
 **Compress losslessly** appears when compatible files are present. Low, Medium, Strong, and Custom control optimization effort, never image quality. Only validated smaller copies are added to the shelf; already-optimized or unsupported files remain unchanged. Compression preserves metadata and runs locally with bundled tools. Resize and format conversion remain separate edits and are not described as lossless.
 
+Strong PDF compression compares multiple lossless encodings and keeps the smallest verified result, including preserving streams that are already efficiently compressed. Savings depend on the document; no fixed reduction is guaranteed.
+
 ### 4. Stack and Separation Controls
 - **Accessible Control Bar Placement**: The **Stack All / Unstack** button is positioned directly between the **Drag All** pill and **Select All** button above your items for prominent visibility and instant access.
 - **Stack All**: Aggregates all current shelf items into a single consolidated stack card that can be dragged and dropped as a unified batch.

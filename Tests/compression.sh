@@ -8,6 +8,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 bash "$ROOT/Tests/check-compression-tools.sh" "$ROOT/DropShelf.app"
 WORK="$(mktemp -d /tmp/dropshelf-compression-suite.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
+python3 "$ROOT/Tests/CompressionPDF/generate_fixtures.py" "$WORK/fixtures" \
+    "$ROOT/Tests/CompressionImages/Fixtures/baseline.jpg"
 xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules \
     "$ROOT/Sources/Models/LosslessCompression.swift" \
     "$ROOT/Sources/Services/CompressionToolRunner.swift" \
@@ -15,4 +17,4 @@ xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path 
     "$ROOT/Tests/Compression/main.swift" \
     -framework AppKit -framework PDFKit -framework ImageIO -framework CryptoKit \
     -o "$WORK/compression-tests"
-"$WORK/compression-tests" "$ROOT"
+"$WORK/compression-tests" "$ROOT" "$WORK/fixtures"

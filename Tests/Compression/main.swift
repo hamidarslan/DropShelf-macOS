@@ -79,6 +79,83 @@ for preset in [CompressionPreset.low, .medium, .strong, .custom] {
     check(try digest(pdf) == originalHash, "\(preset.title) leaves original PDF bytes unchanged")
 }
 
+let fixtures = URL(fileURLWithPath: CommandLine.arguments[2])
+let predictorPDF = fixtures.appendingPathComponent("predictor-efficient.pdf")
+let predictorHash = try digest(predictorPDF)
+let preservingCandidate = root.appendingPathComponent("preserving.pdf")
+let fixtureRunner = CompressionToolRunner(directory: tools)
+try fixtureRunner.run("qpdf", arguments: ["--suppress-recovery", "--compress-streams=y",
+    "--decode-level=generalized", "--preserve-unreferenced", "--remove-unreferenced-resources=no",
+    "--newline-before-endstream", "--object-streams=generate", "--compression-level=9",
+    predictorPDF.path, preservingCandidate.path], work: root,
+    deadline: ProcessInfo.processInfo.systemUptime + 60, zopfli: true, checkCancellation: {})
+let preservingBytes = (try fm.attributesOfItem(atPath: preservingCandidate.path)[.size] as! NSNumber).int64Value
+var strongOptions = LosslessCompressionOptions()
+strongOptions.preset = .strong
+let predictorResult = try service.compressFiles(urls: [predictorPDF], options: strongOptions, outputDirectory: output)
+check(predictorResult.files[0].disposition == .compressed &&
+      predictorResult.files[0].resultBytes! <= preservingBytes,
+      "Strong keeps efficient existing image prediction when recompression would be larger: \(predictorResult.files[0].detail), \(predictorResult.files[0].originalBytes) to \(predictorResult.files[0].resultBytes ?? -1), expected at most \(preservingBytes)")
+check(try digest(predictorPDF) == predictorHash, "Strong candidate search leaves the source unchanged")
+
+// Slow only the extra search; the normal encoder and preservation verifier still run.
+let searchTools = root.appendingPathComponent("search-tools")
+try fm.copyItem(at: tools, to: searchTools)
+let searchEncoder = searchTools.appendingPathComponent("bin/qpdf")
+let realEncoder = searchTools.appendingPathComponent("bin/qpdf-real")
+try fm.moveItem(at: searchEncoder, to: realEncoder)
+let slowSearchWrapper = """
+#!/usr/bin/python3
+import os, sys, time
+from pathlib import Path
+if '--recompress-flate' not in sys.argv:
+    mode = Path(__file__).with_name('search-mode.txt').read_text()
+    if mode == 'timeout':
+        time.sleep(10)
+    elif mode == 'failure':
+        sys.exit(2)
+    elif mode == 'invalid':
+        Path(sys.argv[-1]).write_bytes(b'%PDF-1.7\\ninvalid\\n')
+        sys.exit(0)
+os.execv(os.path.join(os.path.dirname(__file__), 'qpdf-real'), sys.argv)
+"""
+try Data(slowSearchWrapper.utf8).write(to: searchEncoder)
+let searchMode = searchTools.appendingPathComponent("bin/search-mode.txt")
+try Data("timeout".utf8).write(to: searchMode)
+try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: searchEncoder.path)
+var searchManifest = try JSONSerialization.jsonObject(with: Data(contentsOf: searchTools.appendingPathComponent("manifest.json"))) as! [String: Any]
+var searchEntries = searchManifest["tools"] as! [[String: Any]]
+for index in searchEntries.indices where searchEntries[index]["name"] as? String == "qpdf" {
+    searchEntries[index]["sha256"] = try digest(searchEncoder)
+}
+searchManifest["tools"] = searchEntries
+try JSONSerialization.data(withJSONObject: searchManifest).write(to: searchTools.appendingPathComponent("manifest.json"))
+let slowSearchService = LosslessCompressionService(toolsDirectory: searchTools)
+var limitedSearchOptions = strongOptions
+limitedSearchOptions.timeoutSeconds = 5
+let limitedSearch = try slowSearchService.compressFiles(urls: [pdf], options: limitedSearchOptions, outputDirectory: output)
+check(limitedSearch.files[0].disposition == .compressed && limitedSearch.files[0].resultBytes! < limitedSearch.files[0].originalBytes,
+      "an extra search timeout retains an earlier fully verified smaller result")
+for mode in ["failure", "invalid"] {
+    try Data(mode.utf8).write(to: searchMode)
+    let fallback = try slowSearchService.compressFiles(urls: [pdf], options: limitedSearchOptions, outputDirectory: output)
+    check(fallback.files[0].disposition == .compressed && fallback.files[0].resultBytes == limitedSearch.files[0].resultBytes,
+          "an optional candidate \(mode) cannot discard or replace an earlier verified smaller result")
+    check(try digest(pdf) == originalHash, "optional candidate \(mode) leaves source bytes unchanged")
+}
+var cancelSearch = false
+let searchCancellationOutput = root.appendingPathComponent("cancel-search")
+try fm.createDirectory(at: searchCancellationOutput, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+do {
+    _ = try service.compressFiles(urls: [pdf], options: strongOptions, outputDirectory: searchCancellationOutput,
+        checkCancellation: { if cancelSearch { throw CancellationError() } },
+        progress: { _, detail in if detail.contains("2 of 2") { cancelSearch = true } })
+    fatalError("Strong search cancellation was ignored")
+} catch is CancellationError {
+    check(try fm.contentsOfDirectory(atPath: searchCancellationOutput.path).isEmpty,
+          "cancelling extra PDF search removes the earlier candidate and unpublished output")
+}
+
 let batch = try service.compressFiles(urls: [pdf, text, mislabeled], options: .init(), outputDirectory: output)
 check(batch.files.map(\.disposition) == [.compressed, .rejected, .compressed], "mixed batch preserves order and reports rejected files")
 check(batch.succeeded && batch.generatedURLs.count == 2, "partial batches retain validated outputs")
