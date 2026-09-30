@@ -8,7 +8,7 @@ def stream(dictionary: bytes, payload: bytes) -> bytes:
     return dictionary[:-2] + b" /Length " + str(len(payload)).encode() + b">>\nstream\n" + payload + b"\nendstream"
 
 
-def write_pdf(path: pathlib.Path, *, jpeg: bytes, text="DropShelf vector text", attachment=b"attachment-payload", title="Strict Fixture", unused="must survive", reference_unused=False, signed=False, xfa=False, external_stream=False, trailer_signature=False, bad_content=False, id_mode="valid", c2pa_relationship=False, c2pa_subtype=False):
+def write_pdf(path: pathlib.Path, *, jpeg: bytes, text="DropShelf vector text", attachment=b"attachment-payload", title="Strict Fixture", unused="must survive", reference_unused=False, signed=False, xfa=False, external_stream=False, trailer_signature=False, bad_content=False, id_mode="valid", c2pa_relationship=False, c2pa_subtype=False, fake_linearized=None, hint_shaped_stream=None):
     content = (
         b"q 0.2 0.4 0.8 rg 30 40 180 90 re f Q\n"
         b"BT /F1 18 Tf 40 170 Td (" + text.encode("ascii") + b") Tj ET\n"
@@ -51,6 +51,12 @@ def write_pdf(path: pathlib.Path, *, jpeg: bytes, text="DropShelf vector text", 
     if external_stream:
         objects[20] = stream(b"<< /F (external.bin) >>", b"")
         objects[1] = objects[1][:-2] + b" /External 20 0 R >>"
+    if fake_linearized is not None:
+        objects[7] = b"<< /Linearized 1 /L 123 /H [0 0] /Value (" + fake_linearized.encode("ascii") + b") >>"
+        objects[1] = objects[1][:-2] + b" /Private 7 0 R >>"
+    if hint_shaped_stream is not None:
+        objects[22] = stream(b"<< /S 36 >>", hint_shaped_stream)
+        objects[1] = objects[1][:-2] + b" /Private 22 0 R >>"
 
     header = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
     body = bytearray(header)
@@ -98,6 +104,10 @@ def main():
     write_pdf(out / "no-id.pdf", jpeg=jpeg, id_mode="none")
     write_pdf(out / "c2pa-relationship.pdf", jpeg=jpeg, c2pa_relationship=True)
     write_pdf(out / "c2pa-subtype.pdf", jpeg=jpeg, c2pa_subtype=True)
+    write_pdf(out / "fake-linearized-a.pdf", jpeg=jpeg, fake_linearized="original")
+    write_pdf(out / "fake-linearized-b.pdf", jpeg=jpeg, fake_linearized="mutated")
+    write_pdf(out / "hint-shaped-stream-a.pdf", jpeg=jpeg, hint_shaped_stream=b"original hint-shaped payload")
+    write_pdf(out / "hint-shaped-stream-b.pdf", jpeg=jpeg, hint_shaped_stream=b"mutated hint-shaped payload")
     data = (out / "rich.pdf").read_bytes()
     (out / "broken.pdf").write_bytes(data[: len(data) // 2])
 
