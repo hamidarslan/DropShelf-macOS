@@ -46,6 +46,7 @@ func check(_ condition: Bool, _ label: String) {
 }
 
 @MainActor func runTests() async {
+_ = NSApplication.shared
 let suite = "DropShelf.Organizer.Tests.\(UUID().uuidString)"
 let defaults = UserDefaults(suiteName: suite)!
 defer { defaults.removePersistentDomain(forName: suite) }
@@ -214,14 +215,43 @@ for candidate in [MenuBarShortcut(keyCode: 53, modifiers: MenuBarShortcut.contro
     check(!candidate.isValid, "invalid focused shortcut is rejected")
 }
 check(MenuBarShortcut.standard.display == "⌃⌥H", "shortcut display reflects Carbon modifiers")
-check(MenuBarSpacerLayout.lengths(widths: [1440], usableRightWidths: [600], modern: true) == [536],
-      "notch-side displacement stays bounded on modern macOS")
-let multi = MenuBarSpacerLayout.lengths(widths: [1440, 3840], usableRightWidths: [600, 1200], modern: true)
-check(multi.count == 7 && multi.allSatisfy { $0 == 536 }, "mixed displays cap spacer count and segment width")
-check(MenuBarSpacerLayout.lengths(widths: [.nan, -1], usableRightWidths: [.infinity], modern: false) == [2880],
-      "invalid screen geometry uses a safe legacy fallback")
-check(MenuBarSpacerLayout.lengths(widths: [1e100], usableRightWidths: [1e-100], modern: true).count <= 7,
-      "extreme geometry cannot overflow integer conversion")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5)], modern: true) == [507, 507],
+      "actual notched display uses two segments below its reported discard cliff")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1512, usableRightWidth: 663.5)], modern: true) == [433, 433],
+      "smaller notched display preserves both cliff margin and status-area coverage")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 2056)], modern: true) == [964, 964, 964],
+      "non-notched display uses half-width cliff and enough bounded segments")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 3480)], modern: true) == [1676, 1676, 1676],
+      "wide non-notched display receives complete coverage")
+let mixedDisplays = [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 7680)]
+let mixedLengths = MenuBarSpacerLayout.lengths(displays: mixedDisplays, modern: true)
+check(mixedLengths == Array(repeating: 507, count: 16),
+      "notched and 8K display pair uses sixteen complete bounded segments")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 3840)], modern: true) == Array(repeating: 507, count: 8),
+      "mixed display calculation keeps right-area widths paired to the correct full display")
+for invalid in [MenuBarDisplayWidth(width: .nan), MenuBarDisplayWidth(width: .infinity),
+                MenuBarDisplayWidth(width: 0), MenuBarDisplayWidth(width: -1),
+                MenuBarDisplayWidth(width: 1710, usableRightWidth: 0),
+                MenuBarDisplayWidth(width: 1710, usableRightWidth: 1800),
+                MenuBarDisplayWidth(width: 1710, usableRightWidth: .nan),
+                MenuBarDisplayWidth(width: 1710, usableRightWidth: .infinity)] {
+    check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), invalid], modern: true).isEmpty,
+          "invalid paired display refuses the complete modern layout")
+}
+check(MenuBarSpacerLayout.lengths(displays: [], modern: true).isEmpty,
+      "modern geometry never invents an absent screen")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 200, usableRightWidth: 100)], modern: true).isEmpty,
+      "a unit below forty points refuses hiding instead of crossing the discard cliff")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 208)], modern: true) == Array(repeating: 40, count: 6),
+      "minimum safe forty-point unit covers the status area completely")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 8192)], modern: true).isEmpty,
+      "coverage beyond sixteen items refuses instead of silently truncating")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: .nan), MenuBarDisplayWidth(width: -1)], modern: false) == [2880],
+      "legacy geometry preserves a bounded safe fallback")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 6000)], modern: false) == [10000],
+      "legacy wide-screen displacement remains capped at ten thousand")
+check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1e100)], modern: true).isEmpty,
+      "unrepresentable cliff margin refuses extreme geometry")
 defaults.set(true, forKey: "organizer.enabled")
 let launchRuntime = TestRuntime()
 let launched = MenuBarOrganizerController(defaults: defaults, runtime: launchRuntime, now: { now }, schedule: scheduler.schedule)

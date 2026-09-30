@@ -43,7 +43,7 @@ Open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switc
 
 The setup guide reveals your icons while you arrange them. Hold Command and drag less-used icons to the left of the divider; keep DropShelf and essential icons on its right. Complete setup to resume automatic hiding. The organizer changes space in the actual macOS menu bar; it does not copy other apps' icons into the shelf.
 
-On macOS 27, a small **Show icons** tab appears below the menu bar whenever icons are hidden. It lives in a separate app window, so menu-bar overflow cannot swallow it along with the icons. Click the tab to restore everything. Setup asks you to check hiding and restoring before automatic hiding starts. Changing displays or the separate reveal button can require this check again; the organizer remains enabled while waiting.
+On macOS 27, setup asks you to check that your chosen icons hide while the menu bar control stays visible, then use that control to restore them. Changing displays or the separate reveal button can require this check again; the organizer remains enabled while waiting.
 
 - Click DropShelf normally to toggle the shelf. Option-click toggles hidden menu bar icons while the organizer is enabled.
 - Right-click for organizer controls, pauses, and settings. A separate reveal button is optional.

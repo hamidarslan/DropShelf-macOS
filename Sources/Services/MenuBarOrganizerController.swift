@@ -331,7 +331,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         }
     }
     private var visibilityScope: String {
-        "\(runtime.platformSignature)|\(runtime.displaySignature)|toggle=\(showSeparateToggle)|verification=recovery-tab-v1"
+        "\(runtime.platformSignature)|\(runtime.displaySignature)|toggle=\(showSeparateToggle)|verification=native-segments-v2"
     }
     func refreshVisibilityRequirement(requestSettings: Bool = false) {
         guard enabled && isRunning else { return }
@@ -406,14 +406,14 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         guard enabled && isRunning else { statusMessage = enabled ? "Organizer starts when DropShelf is ready" : "Menu bar organizer is off"; return }
         if !runtime.conflictMessage.isEmpty { statusMessage = runtime.conflictMessage }
         else if requiresVisibilityConfirmation {
-            statusMessage = hasVisibilityTrial ? "Check that icons are hidden and the Show icons tab remains available" : "Try hiding, then check the Show icons tab below the menu bar"
+            statusMessage = hasVisibilityTrial ? "Check that icons hide and the menu bar control stays visible" : "Try hiding, then check your menu bar control"
         }
         else if isArranging { statusMessage = "Hold Command and drag icons to the left of the divider" }
         else if !hasCompletedSetup { statusMessage = "Arrange your icons, then finish setup" }
         else if isPaused { statusMessage = pauseDescription }
         else {
             statusMessage = hidden
-                ? (runtime.requiresVisibilityConfirmation ? "Icons hidden. Use the Show icons tab to reveal" : "Icons hidden. Option-click DropShelf to reveal")
+                ? (showSeparateToggle ? "Icons hidden. Click the menu bar arrow to reveal" : "Icons hidden. Option-click DropShelf to reveal")
                 : "Menu bar icons are visible"
         }
     }
@@ -491,7 +491,6 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
 
 @MainActor
 private final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
-    private let recoveryControl = MenuBarRecoveryController()
     private var divider: NSStatusItem?
     private var spacers: [NSStatusItem] = []
     private var separateToggle: NSStatusItem?
@@ -543,13 +542,8 @@ private final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         }
         createSeparateToggle()
         if modern {
-            for index in 1...6 {
-                let item = NSStatusBar.system.statusItem(withLength: 0)
-                item.autosaveName = "DropShelf.Organizer.Spacer.\(index)"
-                item.button?.setAccessibilityElement(false)
-                item.isVisible = false
-                spacers.append(item)
-            }
+            // Reserve the bounded pool before the divider to keep its ordering across display changes.
+            ensureSpacers(15)
         }
         let item = NSStatusBar.system.statusItem(withLength: 16)
         item.autosaveName = "DropShelf.Organizer.Divider"
@@ -584,64 +578,73 @@ private final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         if let divider { NSStatusBar.system.removeStatusItem(divider) }; divider = nil
         spacers.forEach { NSStatusBar.system.removeStatusItem($0) }; spacers.removeAll()
         if let separateToggle { NSStatusBar.system.removeStatusItem(separateToggle) }; separateToggle = nil
-        recoveryControl.hide()
         controller = nil; anchor = nil; layoutMessage = ""
     }
     @discardableResult func apply(hidden: Bool, separateToggle: Bool) -> Bool {
         layoutEpoch &+= 1
         let epoch = layoutEpoch
-        self.separateToggle?.length = separateToggle ? 24 : 0
-        self.separateToggle?.isVisible = separateToggle
+        if let item = self.separateToggle {
+            let length: CGFloat = separateToggle ? 24 : 0
+            if item.length != length { item.length = length }
+            if item.isVisible != separateToggle { item.isVisible = separateToggle }
+        }
         var hidden = hidden
         let synthetic = syntheticHostCapability()
         if hidden && conflictingOrganizerRunning {
             hidden = false
             layoutMessage = "Hidebar is running. Use one organizer at a time."
-        } else if hidden && synthetic {
-            let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
-                ?? NSScreen.main ?? NSScreen.screens.first
-            if let screen, let controller,
-               recoveryControl.show(on: screen, reveal: { [weak controller] in controller?.reveal() }) {
-                layoutMessage = ""
-            } else {
-                hidden = false
-                layoutMessage = "The Show icons tab could not be displayed. Your icons remain visible."
-            }
-        } else if hidden && !canHide(requiresToggle: separateToggle) {
+        } else if hidden && !synthetic && !canHide(requiresToggle: separateToggle) {
             hidden = false
             layoutMessage = "Keep DropShelf and the optional toggle to the right of the divider. Hold Command to rearrange them."
         } else if hidden { layoutMessage = "" }
-        let lengths = MenuBarSpacerLayout.lengths(widths: NSScreen.screens.map { Double($0.frame.width) },
-            usableRightWidths: NSScreen.screens.compactMap { $0.auxiliaryTopRightArea.map { Double($0.width) } }, modern: modern)
+        let lengths = spacerLengths()
+        if hidden && lengths.isEmpty {
+            hidden = false
+            layoutMessage = "Menu bar space is unavailable for this display setup. Your icons remain visible."
+        }
+        if modern { ensureSpacers(max(0, lengths.count - 1)) }
         divider?.length = hidden ? lengths[0] : 16
         divider?.button?.title = hidden ? "" : "│"
         for (index, item) in spacers.enumerated() {
             let slot = index + 1
-            item.length = hidden && slot < lengths.count ? lengths[slot] : 0
-            item.isVisible = hidden && slot < lengths.count
+            let length: CGFloat = hidden && slot < lengths.count ? lengths[slot] : 0
+            let visible = hidden && slot < lengths.count
+            if item.length != length { item.length = length }
+            if item.isVisible != visible { item.isVisible = visible }
         }
         let image = NSImage(systemSymbolName: hidden ? "chevron.left" : "chevron.right", accessibilityDescription: hidden ? "Reveal menu bar icons" : "Hide menu bar icons")
         image?.isTemplate = true
         self.separateToggle?.button?.image = image
         self.separateToggle?.button?.toolTip = hidden ? "Reveal menu bar icons" : "Hide menu bar icons"
-        if !hidden { recoveryControl.hide() }
         if hidden {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self, self.layoutEpoch == epoch,
                           let controller = self.controller, controller.isRunning, controller.hidden else { return }
-                    let ready = synthetic ? self.recoveryControl.isPresented
-                        : self.recoveryIsReachable(requiresToggle: separateToggle)
+                    let ready = synthetic || self.recoveryIsReachable(requiresToggle: separateToggle)
                     if self.conflictingOrganizerRunning || !ready {
-                        self.layoutMessage = synthetic
-                            ? "Icons were revealed because the Show icons tab became unavailable."
-                            : "Icons were revealed to keep DropShelf reachable. Move the divider to the left of DropShelf."
+                        self.layoutMessage = "Icons were revealed to keep DropShelf reachable. Move the divider to the left of DropShelf."
                         controller.rejectVisibilityTrial()
                     }
                 }
             }
         }
         return hidden
+    }
+    private func spacerLengths() -> [Double] {
+        MenuBarSpacerLayout.lengths(displays: NSScreen.screens.map {
+            MenuBarDisplayWidth(width: Double($0.frame.width),
+                usableRightWidth: $0.auxiliaryTopRightArea.map { Double($0.width) })
+        }, modern: modern)
+    }
+    private func ensureSpacers(_ count: Int) {
+        while spacers.count < min(count, 15) {
+            let item = NSStatusBar.system.statusItem(withLength: 0)
+            item.autosaveName = "DropShelf.Organizer.Spacer.\(spacers.count + 1)"
+            item.button?.setAccessibilityElement(false)
+            item.isVisible = false
+            spacers.append(item)
+        }
     }
     private func screenRect(_ item: NSStatusItem?) -> CGRect? {
         guard let button = item?.button, let window = button.window, item?.isVisible == true else { return nil }

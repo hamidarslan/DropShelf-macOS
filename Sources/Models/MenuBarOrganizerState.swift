@@ -40,17 +40,39 @@ enum MenuBarPause: Equatable {
     }
 }
 
+struct MenuBarDisplayWidth {
+    let width: Double
+    let usableRightWidth: Double?
+
+    init(width: Double, usableRightWidth: Double? = nil) {
+        self.width = width
+        self.usableRightWidth = usableRightWidth
+    }
+}
+
 enum MenuBarSpacerLayout {
-    static func lengths(widths: [Double], usableRightWidths: [Double], modern: Bool) -> [Double] {
-        let widths = widths.filter { $0.isFinite && $0 > 0 }
-        let widest = widths.max() ?? 1440
-        guard modern else { return [min(10_000, max(500, widest * 2))] }
-        let narrowest = widths.min() ?? 1440
-        let right = usableRightWidths.filter { $0.isFinite && $0 > 0 }.min() ?? narrowest / 2
-        let segment = max(40, floor(min(narrowest / 2, right) - 64))
-        let ratio = min(7, max(1, ceil(widest / segment)))
-        let count = widths.count <= 1 ? 1 : Int(ratio)
-        return Array(repeating: segment, count: count)
+    static func lengths(displays: [MenuBarDisplayWidth], modern: Bool) -> [Double] {
+        if !modern {
+            let widths = displays.map(\.width).filter { $0.isFinite && $0 > 0 }
+            let widest = widths.max() ?? 1440
+            return [min(10_000, max(500, widest * 2))]
+        }
+        guard !displays.isEmpty else { return [] }
+        var smallestCliff = Double.infinity
+        var widestStatusArea = 0.0
+        for display in displays {
+            guard display.width.isFinite, display.width > 0 else { return [] }
+            let statusWidth = display.usableRightWidth ?? display.width
+            guard statusWidth.isFinite, statusWidth > 0, statusWidth <= display.width else { return [] }
+            let cliff = statusWidth < display.width ? statusWidth * 0.75 : display.width * 0.5
+            smallestCliff = min(smallestCliff, cliff)
+            widestStatusArea = max(widestStatusArea, statusWidth)
+        }
+        let unit = floor(smallestCliff - 64)
+        guard unit.isFinite, unit >= 40, unit < smallestCliff else { return [] }
+        let required = ceil(widestStatusArea / unit)
+        guard required.isFinite, required >= 1, required <= 16 else { return [] }
+        return Array(repeating: unit, count: Int(required))
     }
 }
 

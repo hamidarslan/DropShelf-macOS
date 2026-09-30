@@ -187,10 +187,10 @@ struct MenuBarOrganizerSettingsView: View {
                 }
             }
             guideStep(1, "Hold Command (⌘) and drag less-used icons to the left of the divider in your real menu bar.")
-            guideStep(2, "Keep DropShelf and the icons you use every day on the right.")
+            guideStep(2, organizer.showSeparateToggle ? "Keep the arrow and the icons you use every day on the right." : "Keep DropShelf and the icons you use every day on the right.")
             guideStep(3, "Try hiding. Check the result before showing icons again.")
             if organizer.requiresVisibilityConfirmation {
-                Text("While icons are hidden, a Show icons tab stays below the menu bar. Check that your chosen icons disappear, then click the tab to bring them back. If needed, reopen DropShelf from Applications to reveal all icons.")
+                Text(organizer.showSeparateToggle ? "Check that your chosen icons disappear while the arrow stays in the menu bar. Click the arrow again to restore them. Reopen DropShelf from Applications if you need to reveal everything." : "Check that your chosen icons disappear while DropShelf stays in the menu bar. Option-click DropShelf to restore them. Reopen DropShelf from Applications if needed.")
                     .font(.system(size: 11)).foregroundColor(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -210,8 +210,8 @@ struct MenuBarOrganizerSettingsView: View {
                 }
                     .buttonStyle(.borderedProminent)
                     .disabled(organizer.requiresVisibilityConfirmation && !organizer.hasVisibilityTrial)
-                    .accessibilityLabel(organizer.requiresVisibilityConfirmation ? "Confirm icons hide and the Show icons tab restores them" : "Done")
-                    .help(organizer.requiresVisibilityConfirmation ? "Confirm your chosen icons hide and the Show icons tab brings them back." : "Finish arranging icons")
+                    .accessibilityLabel(organizer.requiresVisibilityConfirmation ? "Confirm icons hide and the menu bar control stays visible and restores them" : "Done")
+                    .help(organizer.requiresVisibilityConfirmation ? "Confirm your chosen icons hide and the menu bar control stays visible and restores them." : "Finish arranging icons")
             }
             .controlSize(.small)
             Text("Some system icons cannot move. A display notch can limit space when icons are revealed.")
