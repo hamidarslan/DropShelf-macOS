@@ -5,6 +5,7 @@ public struct SettingsView: View {
     @ObservedObject var clipboard = ClipboardStore.shared
     @Environment(\.presentationMode) var presentationMode
     public var onDismiss: (() -> Void)? = nil
+    var embedded = false
 
     @State private var quickActionStatus: String? = nil
     @State private var cliStatus: String? = nil
@@ -13,37 +14,42 @@ public struct SettingsView: View {
         self.onDismiss = onDismiss
     }
 
+    init(embedded: Bool) {
+        self.embedded = embedded
+    }
+
     init(clipboard: ClipboardStore) {
         self.clipboard = clipboard
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                BrandIconView(.settings, size: 20)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.blue)
+            if !embedded {
+                HStack {
+                    BrandIconView(.settings, size: 20)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.blue)
 
-                Text("DropShelf Preferences")
-                    .font(.system(size: 15, weight: .semibold))
+                    Text("DropShelf Preferences")
+                        .font(.system(size: 15, weight: .semibold))
 
-                Spacer()
+                    Spacer()
 
-                Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                    onDismiss?()
-                }) {
-                    ShelfSymbol(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.secondary)
+                    Button(action: {
+                        presentationMode.wrappedValue.dismiss()
+                        onDismiss?()
+                    }) {
+                        ShelfSymbol(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            }
-            .padding([.horizontal, .top], 18)
-            .padding(.bottom, 12)
+                .padding([.horizontal, .top], 18)
+                .padding(.bottom, 12)
 
-            Divider()
+                Divider()
+            }
 
             // Scrollable Settings Content
             ScrollView(.vertical, showsIndicators: true) {
@@ -284,9 +290,10 @@ public struct SettingsView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
             }
-            .frame(height: 440)
+            .frame(maxHeight: embedded ? .infinity : 440)
         }
-        .frame(width: 360)
+        .frame(width: embedded ? nil : 360)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(store.useRefinedClassic ? ClassicPalette(light: store.isEffectiveLightMode).surface : Color(nsColor: .windowBackgroundColor).opacity(0.95))
