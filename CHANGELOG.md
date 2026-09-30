@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.2
+
+- Compare multiple lossless PDF encodings in Strong mode and keep the smallest verified copy.
+- Preserve efficient existing image compression when recompression would make the PDF larger.
+- Retain a verified result if an additional search reaches its time budget; cancellation still removes unpublished output.
+
 ## 1.5.1
 
 - Accept readable PDFs with stale Fast Web View hints while retaining strict document-content verification.

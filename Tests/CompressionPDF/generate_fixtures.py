@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import pathlib
+import random
 import sys
 import zlib
 
@@ -83,6 +84,42 @@ def write_pdf(path: pathlib.Path, *, jpeg: bytes, text="DropShelf vector text", 
     path.write_bytes(body)
 
 
+def write_predictor_pdf(path: pathlib.Path):
+    rng = random.Random(20260930)
+    first_row = bytes(rng.randrange(256) for _ in range(256))
+    samples = [bytes((value + y) % 256 for value in first_row) for y in range(256)]
+    predicted = bytearray()
+    previous = bytes(256)
+    for row in samples:
+        predicted.append(2)
+        predicted.extend((value - prior) % 256 for value, prior in zip(row, previous))
+        previous = row
+    payload = zlib.compress(bytes(predicted), 9)
+    assert len(payload) < 1024
+
+    content = b"q 256 0 0 256 0 0 cm /Im1 Do Q\n"
+    objects = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 256 256] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        4: stream(b"<< >>", content),
+        5: stream(b"<< /Type /XObject /Subtype /Image /Width 256 /Height 256 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 12 /Colors 1 /BitsPerComponent 8 /Columns 256 >> >>", payload),
+        6: b"<< /Title (Predictor-efficient grayscale image) /Subject (Lossless PDF image compression fixture) /Keywords (" + (b"predictor grayscale lossless compression " * 64) + b") >>",
+    }
+    header = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
+    body = bytearray(header)
+    offsets = {0: 0}
+    for number in sorted(objects):
+        offsets[number] = len(body)
+        body += f"{number} 0 obj\n".encode() + objects[number] + b"\nendobj\n"
+    xref_offset = len(body)
+    body += b"xref\n0 7\n0000000000 65535 f \n"
+    for number in range(1, 7):
+        body += f"{offsets[number]:010d} 00000 n \n".encode()
+    body += f"trailer\n<< /Size 7 /Root 1 0 R /Info 6 0 R /ID [<00112233445566778899aabbccddeeff><ffeeddccbbaa99887766554433221100>] >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
+    path.write_bytes(body)
+
+
 def main():
     out = pathlib.Path(sys.argv[1])
     jpeg = pathlib.Path(sys.argv[2]).read_bytes()
@@ -108,6 +145,7 @@ def main():
     write_pdf(out / "fake-linearized-b.pdf", jpeg=jpeg, fake_linearized="mutated")
     write_pdf(out / "hint-shaped-stream-a.pdf", jpeg=jpeg, hint_shaped_stream=b"original hint-shaped payload")
     write_pdf(out / "hint-shaped-stream-b.pdf", jpeg=jpeg, hint_shaped_stream=b"mutated hint-shaped payload")
+    write_predictor_pdf(out / "predictor-efficient.pdf")
     data = (out / "rich.pdf").read_bytes()
     (out / "broken.pdf").write_bytes(data[: len(data) // 2])
 
