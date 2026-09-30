@@ -160,6 +160,7 @@ class Document
         if (static_cast<std::uint64_t>(info.st_size) > max_file_bytes) {
             throw Reject("resource-limit");
         }
+        file_size = static_cast<std::uint64_t>(info.st_size);
 
         pdf.setSuppressWarnings(true);
         pdf.setAttemptRecovery(false);
@@ -211,9 +212,6 @@ class Document
             writer.setDecodeLevel(qpdf_dl_all);
             writer.setCompressStreams(false);
             writer.write();
-            if (pdf.isLinearized() && !pdf.checkLinearization()) {
-                throw Reject("malformed");
-            }
         } catch (Reject const&) {
             throw;
         } catch (...) {
@@ -227,6 +225,78 @@ class Document
     QPDF pdf;
     int pages{0};
     std::vector<QPDFObjectHandle> objects;
+
+    bool verified_linearization_storage(std::set<QPDFObjGen>& result)
+    {
+        result.clear();
+        if (pdf.anyWarnings()) {
+            throw Reject("malformed");
+        }
+        if (!pdf.isLinearized()) {
+            return false;
+        }
+
+        bool const valid = pdf.checkLinearization();
+        auto const warnings = pdf.getWarnings();
+        if (!valid || !warnings.empty()) {
+            return false;
+        }
+
+        std::vector<QPDFObjectHandle> dictionaries;
+        auto const& xref = pdf.getXRefTable();
+        for (auto object: pdf.getAllObjects()) {
+            if (!object.isIndirect() || !object.isDictionary() || !object.hasKey("/Linearized")) {
+                continue;
+            }
+            auto linearized = object.getKey("/Linearized");
+            auto length = object.getKey("/L");
+            auto entry = xref.find(object.getObjGen());
+            if (linearized.isNumber() && linearized.getNumericValue() >= 1.0 &&
+                linearized.getNumericValue() < 2.0 && length.isInteger() &&
+                length.getIntValue() == static_cast<long long>(file_size) &&
+                entry != xref.end() && entry->second.getType() == 1 &&
+                entry->second.getOffset() >= 0 && entry->second.getOffset() < 1024) {
+                dictionaries.push_back(object);
+            }
+        }
+        if (dictionaries.size() != 1) {
+            return false;
+        }
+
+        auto dictionary = dictionaries.front();
+        auto hints = dictionary.getKey("/H");
+        if (!hints.isArray() || (hints.getArrayNItems() != 2 && hints.getArrayNItems() != 4)) {
+            return false;
+        }
+        result.insert(dictionary.getObjGen());
+        for (int i = 0; i < hints.getArrayNItems(); i += 2) {
+            auto offset = hints.getArrayItem(i);
+            auto length = hints.getArrayItem(i + 1);
+            if (!offset.isInteger() || !length.isInteger() || offset.getIntValue() < 0 ||
+                length.getIntValue() <= 0) {
+                result.clear();
+                return false;
+            }
+            bool found = false;
+            for (auto const& [key, entry]: xref) {
+                if (entry.getType() == 1 && entry.getOffset() == offset.getIntValue()) {
+                    auto hint = pdf.getObject(key.getObj(), key.getGen());
+                    if (!hint.isStream()) {
+                        result.clear();
+                        return false;
+                    }
+                    result.insert(key);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                result.clear();
+                return false;
+            }
+        }
+        return true;
+    }
 
     StreamFingerprint stream_fingerprint(QPDFObjectHandle stream)
     {
@@ -273,6 +343,7 @@ class Document
 
   private:
     std::chrono::steady_clock::time_point deadline;
+    std::uint64_t file_size{0};
     std::uint64_t total_stream_bytes{0};
     std::map<QPDFObjGen, StreamFingerprint> streams;
     std::set<QPDFObjGen> storage_objects;
@@ -304,29 +375,9 @@ class Document
 
     void identify_storage_objects(std::vector<QPDFObjectHandle> const& all)
     {
-        std::set<qpdf_offset_t> hint_offsets;
         for (auto object: all) {
             if (is_storage_object(object)) {
                 storage_objects.insert(object.getObjGen());
-            }
-            if (object.isDictionary() && object.hasKey("/Linearized")) {
-                storage_objects.insert(object.getObjGen());
-                auto hints = object.getKey("/H");
-                if (hints.isArray()) {
-                    for (int i = 0; i + 1 < hints.getArrayNItems(); i += 2) {
-                        auto offset = hints.getArrayItem(i);
-                        if (offset.isInteger() && offset.getIntValue() >= 0) {
-                            hint_offsets.insert(static_cast<qpdf_offset_t>(offset.getIntValue()));
-                        }
-                    }
-                }
-            }
-        }
-        if (!hint_offsets.empty()) {
-            for (auto const& [object, entry]: pdf.getXRefTable()) {
-                if (entry.getType() == 1 && hint_offsets.count(entry.getOffset()) != 0) {
-                    storage_objects.insert(object);
-                }
             }
         }
     }
@@ -398,20 +449,66 @@ class Comparator
 
     bool compare()
     {
-        if (original.pages != candidate.pages || original.objects.size() != candidate.objects.size()) {
+        if (original.pages != candidate.pages) {
             return false;
         }
+        if (compare_views(original.objects, candidate.objects)) {
+            return true;
+        }
+
+        std::set<QPDFObjGen> original_storage;
+        std::set<QPDFObjGen> candidate_storage;
+        bool const original_linearized =
+            original.verified_linearization_storage(original_storage);
+        bool const candidate_linearized =
+            candidate.verified_linearization_storage(candidate_storage);
+        if (!original_linearized && !candidate_linearized) {
+            return false;
+        }
+
+        std::vector<QPDFObjectHandle> original_content;
+        std::vector<QPDFObjectHandle> candidate_content;
+        for (auto object: original.objects) {
+            if (original_storage.count(object.getObjGen()) == 0) {
+                original_content.push_back(object);
+            }
+        }
+        for (auto object: candidate.objects) {
+            if (candidate_storage.count(object.getObjGen()) == 0) {
+                candidate_content.push_back(object);
+            }
+        }
+        return compare_views(original_content, candidate_content);
+    }
+
+  private:
+    Document& original;
+    Document& candidate;
+    std::chrono::steady_clock::time_point deadline;
+    std::map<QPDFObjGen, QPDFObjGen> forward;
+    std::map<QPDFObjGen, QPDFObjGen> reverse;
+    std::size_t compared_nodes{0};
+
+    bool compare_views(
+        std::vector<QPDFObjectHandle> const& left_objects,
+        std::vector<QPDFObjectHandle> const& right_objects)
+    {
+        if (left_objects.size() != right_objects.size()) {
+            return false;
+        }
+        forward.clear();
+        reverse.clear();
         if (!compare_object(original.pdf.getTrailer(), candidate.pdf.getTrailer(), 0, true)) {
             return false;
         }
 
-        for (auto left: original.objects) {
+        for (auto left: left_objects) {
             auto const left_key = left.getObjGen();
             if (forward.count(left_key) != 0) {
                 continue;
             }
             bool matched = false;
-            for (auto right: candidate.objects) {
+            for (auto right: right_objects) {
                 auto const right_key = right.getObjGen();
                 if (reverse.count(right_key) != 0) {
                     continue;
@@ -429,16 +526,8 @@ class Comparator
                 return false;
             }
         }
-        return forward.size() == original.objects.size() && reverse.size() == candidate.objects.size();
+        return forward.size() == left_objects.size() && reverse.size() == right_objects.size();
     }
-
-  private:
-    Document& original;
-    Document& candidate;
-    std::chrono::steady_clock::time_point deadline;
-    std::map<QPDFObjGen, QPDFObjGen> forward;
-    std::map<QPDFObjGen, QPDFObjGen> reverse;
-    std::size_t compared_nodes{0};
 
     void check_limits(int depth)
     {

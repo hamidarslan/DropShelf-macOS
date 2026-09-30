@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+- Accept readable PDFs with stale Fast Web View hints while retaining strict document-content verification.
+- Preserve relocated hint streams during lossless compression instead of rejecting unchanged content.
+- Describe validation failures without incorrectly declaring the source PDF damaged.
+
 ## 1.5.0
 
 - Add verified lossless compression for supported PDFs, JPEGs, and PNGs.

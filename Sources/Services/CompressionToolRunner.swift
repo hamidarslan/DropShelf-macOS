@@ -118,9 +118,9 @@ final class CompressionToolRunner {
                     "provenance": "This PDF contains content credentials. Rewriting it could invalidate them, so the original was kept.",
                     "encrypted": "Encrypted PDFs are not supported for verified lossless compression. The original was kept.",
                     "xfa": "This PDF contains XFA forms that cannot be verified safely. The original was kept.",
-                    "malformed": "The PDF is damaged or requires repair. It was left unchanged.",
+                    "malformed": "DropShelf could not safely validate this PDF. It was left unchanged.",
                     "unsupported-stream": "This PDF contains an unsupported or external data stream. It was left unchanged.",
-                    "content-mismatch": "The smaller file did not preserve all content and metadata. It was discarded.",
+                    "content-mismatch": "Lossless preservation could not be confirmed. The proposed output was discarded.",
                     "resource-limit": "The file exceeds the safe verification limits. The original was kept.",
                     "io-error": "The file could not be read safely. The original was kept."
                 ]

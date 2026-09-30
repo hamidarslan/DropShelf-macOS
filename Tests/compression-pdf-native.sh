@@ -80,6 +80,31 @@ python3 "$ROOT/Tests/CompressionPDF/generate_fixtures.py" "$WORK/fixtures" "$WOR
 "$QPDF_CLI" --preserve-unreferenced --object-streams=generate --recompress-flate --compression-level=9 \
   "$WORK/fixtures/rich.pdf" "$WORK/fixtures/repacked.pdf"
 "$QPDF_CLI" --linearize "$WORK/fixtures/linear-source.pdf" "$WORK/fixtures/linearized.pdf"
+"$QPDF_CLI" --compress-streams=n --linearize \
+  "$WORK/fixtures/linear-source.pdf" "$WORK/fixtures/stale-hints.pdf"
+python3 - "$WORK/fixtures/stale-hints.pdf" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+d = bytearray(p.read_bytes())
+m = re.search(rb"/H\s*\[\s*(\d+)\s+(\d+)", d)
+assert m, "linearized fixture did not contain a primary hint stream"
+offset = int(m.group(1))
+start = d.index(b"stream\n", offset) + len(b"stream\n")
+assert d[start:start + 4] == b"\x00\x00\x00\x06", "unexpected hint-table fixture layout"
+d[start + 3] = 7
+p.write_bytes(d)
+PY
+"$QPDF_CLI" --preserve-unreferenced --object-streams=generate --recompress-flate \
+  --compression-level=9 "$WORK/fixtures/stale-hints.pdf" \
+  "$WORK/fixtures/stale-hints-repacked.pdf"
+"$QPDF_CLI" --linearize "$WORK/fixtures/fake-linearized-a.pdf" \
+  "$WORK/fixtures/fake-linearized-a-packed.pdf"
+"$QPDF_CLI" --linearize "$WORK/fixtures/fake-linearized-b.pdf" \
+  "$WORK/fixtures/fake-linearized-b-packed.pdf"
+"$QPDF_CLI" --linearize "$WORK/fixtures/hint-shaped-stream-a.pdf" \
+  "$WORK/fixtures/hint-shaped-stream-a-packed.pdf"
+"$QPDF_CLI" --linearize "$WORK/fixtures/hint-shaped-stream-b.pdf" \
+  "$WORK/fixtures/hint-shaped-stream-b-packed.pdf"
 cp "$WORK/fixtures/linearized.pdf" "$WORK/fixtures/bad-linearized.pdf"
 python3 - "$WORK/fixtures/bad-linearized.pdf" <<'PY'
 import pathlib, re, sys
@@ -136,9 +161,11 @@ PY
 run_ok 1 inspect "$WORK/fixtures/rich.pdf"
 run_ok 1 inspect "$WORK/fixtures/repacked.pdf"
 run_ok 1 inspect "$WORK/fixtures/linearized.pdf"
+run_ok 1 inspect "$WORK/fixtures/stale-hints.pdf"
 run_ok none compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/rich.pdf"
 run_ok none compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/repacked.pdf"
 run_ok none compare "$WORK/fixtures/linear-source.pdf" "$WORK/fixtures/linearized.pdf"
+run_ok none compare "$WORK/fixtures/stale-hints.pdf" "$WORK/fixtures/stale-hints-repacked.pdf"
 
 run_reject signed inspect "$WORK/fixtures/signed.pdf"
 run_reject signed inspect "$WORK/fixtures/signed-object-stream.pdf"
@@ -157,6 +184,8 @@ run_reject content-mismatch compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/at
 run_reject content-mismatch compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/metadata-mutated.pdf"
 run_reject content-mismatch compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/unused-mutated.pdf"
 run_reject content-mismatch compare "$WORK/fixtures/rich.pdf" "$WORK/fixtures/jpeg-mutated.pdf"
+run_reject content-mismatch compare "$WORK/fixtures/fake-linearized-a-packed.pdf" "$WORK/fixtures/fake-linearized-b-packed.pdf"
+run_reject content-mismatch compare "$WORK/fixtures/hint-shaped-stream-a-packed.pdf" "$WORK/fixtures/hint-shaped-stream-b-packed.pdf"
 
 cp "$WORK/fixtures/repacked.pdf" "$WORK/fixtures/repacked-first-id.pdf"
 cp "$WORK/fixtures/repacked.pdf" "$WORK/fixtures/repacked-second-id.pdf"
