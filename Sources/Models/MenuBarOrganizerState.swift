@@ -78,3 +78,12 @@ enum MenuBarOrganizerGeometry {
         return true
     }
 }
+
+// One bounded divider preserves the native arrow instead of registering a spacer pool.
+enum MenuBarNativeLayout {
+    static func width(usableWidth: Double) -> Double? {
+        guard usableWidth.isFinite, usableWidth >= 208 else { return nil }
+        let width = floor(usableWidth * 0.5 - 64)
+        return width >= 40 && width <= 10_000 ? width : nil
+    }
+}

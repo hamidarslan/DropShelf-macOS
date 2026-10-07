@@ -8,6 +8,12 @@ The current build runs outside App Sandbox with the current user's filesystem pe
 
 `build.sh` enables Hardened Runtime and uses an ad-hoc signature. This does not establish Developer ID identity or notarization, and does not guarantee Gatekeeper acceptance on another Mac. Hardened Runtime is distinct from App Sandbox and does not prevent every vulnerability.
 
+## Menu bar verification
+
+On macOS 27 and later, the organizer requests Accessibility permission only after the user presses its verification button in Settings. macOS grants broad access with this permission. The organizer's implementation uses read-only Accessibility queries to locate its arrow and divider in MenuBarAgent, check their frames, and verify the arrow at its on-screen position. It does not perform Accessibility actions, synthesize input, inspect document contents, record the screen, or upload menu-bar data.
+
+Queries run off the main thread with node, depth, and time limits. Missing permission, ambiguous geometry, or an unreachable arrow prevents hiding or restores icons. The organizer uses native status items, not assessment-mode restrictions or persistent unloading of other apps' icons. Ad-hoc signing means a new build can require a renewed Accessibility grant. These checks reduce the risk of losing the reveal control; they cannot guarantee compatibility with untested future macOS releases.
+
 ## Files and history
 
 Original file references are never eligible for automatic cleanup. Generated file ownership is recorded per URL and cleanup is restricted to the staging directory, including a resolved-path check. Stacking and splitting preserve that ownership.

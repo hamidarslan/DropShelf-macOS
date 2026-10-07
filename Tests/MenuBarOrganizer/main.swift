@@ -7,6 +7,10 @@ func check(_ condition: Bool, _ label: String) {
 }
 
 @MainActor final class TestRuntime: MenuBarOrganizerRuntime {
+    struct PendingLayout {
+        let requestedHidden: Bool
+        let completion: @MainActor (Bool) -> Void
+    }
     var starts = 0
     var stops = 0
     var layouts: [Bool] = []
@@ -17,16 +21,33 @@ func check(_ condition: Bool, _ label: String) {
     var displaySignature = "first"
     var conflictMessage = ""
     var hidingUnavailableReason: String?
+    var requiresDedicatedArrow = false
     var requiresVisibilityConfirmation = false
     var allowsVisibilityTrial = true
     var platformSignature = "27.0"
     var conflictingOrganizerRunning = false
     var quitRequests = 0
     var quitAccepted = true
+    var capabilityRefreshes = 0
+    var holdLayoutCompletions = false
+    var pendingLayouts: [PendingLayout] = []
     func quitConflictingOrganizer() -> Bool { quitRequests += 1; return quitAccepted }
     func start(anchor: NSStatusItem, controller: MenuBarOrganizerController) { starts += 1 }
     func stop() { stops += 1; activeShortcut = nil }
-    func apply(hidden: Bool, separateToggle: Bool) -> Bool { layouts.append(hidden); return hidden && acceptLayout }
+    func refreshCapabilities() { capabilityRefreshes += 1 }
+    func apply(hidden: Bool, separateToggle: Bool, completion: @escaping @MainActor (Bool) -> Void) {
+        layouts.append(hidden)
+        let result = hidden && acceptLayout
+        if holdLayoutCompletions {
+            pendingLayouts.append(PendingLayout(requestedHidden: hidden, completion: completion))
+        } else {
+            completion(result)
+        }
+    }
+    func completeLayout(at index: Int = 0, as actualHidden: Bool? = nil) {
+        let pending = pendingLayouts.remove(at: index)
+        pending.completion(actualHidden ?? (pending.requestedHidden && acceptLayout))
+    }
     func registerShortcut(_ shortcut: MenuBarShortcut) -> Bool {
         guard !rejectShortcut else { return false }
         activeShortcut = shortcut
@@ -247,6 +268,188 @@ controller.setEnabled(false)
 let persisted = MenuBarOrganizerController(defaults: defaults, runtime: TestRuntime(), now: { now }, schedule: scheduler.schedule)
 check(!persisted.enabled && persisted.delay == 30 && persisted.shortcut == replacement,
       "off state and customized settings survive a fresh controller")
+
+let asyncSuite = suite + ".async-layout"
+let asyncDefaults = UserDefaults(suiteName: asyncSuite)!
+defer { asyncDefaults.removePersistentDomain(forName: asyncSuite) }
+asyncDefaults.set(true, forKey: "organizer.enabled")
+asyncDefaults.set(true, forKey: "organizer.hasCompletedSetup")
+asyncDefaults.set(false, forKey: "organizer.autoHide")
+asyncDefaults.set(false, forKey: "organizer.startHidden")
+let asyncRuntime = TestRuntime()
+let asyncScheduler = TestScheduler()
+let asyncController = MenuBarOrganizerController(defaults: asyncDefaults, runtime: asyncRuntime,
+    now: { now }, schedule: asyncScheduler.schedule)
+asyncController.configure(anchor: anchor) {}
+asyncRuntime.holdLayoutCompletions = true
+asyncController.hide()
+check(asyncController.isApplying && asyncController.pendingHiddenTarget == true && !asyncController.hidden &&
+      asyncController.statusMessage == "Checking menu bar controls…",
+      "a pending hide stays visibly revealed until runtime verification succeeds")
+let layoutsDuringPendingHide = asyncRuntime.layouts.count
+asyncController.hide()
+check(asyncRuntime.layouts.count == layoutsDuringPendingHide,
+      "a repeated hide request cannot start a second pending layout")
+asyncController.toggleHiddenItems()
+check(asyncRuntime.pendingLayouts.map(\.requestedHidden) == [true, false] &&
+      asyncController.isApplying && asyncController.pendingHiddenTarget == false && !asyncController.hidden,
+      "a toggle during pending hide cancels toward a verified reveal")
+asyncRuntime.completeLayout(at: 0, as: true)
+check(asyncController.isApplying && asyncController.pendingHiddenTarget == false && !asyncController.hidden,
+      "a stale successful hide callback cannot hide after reveal was requested")
+asyncRuntime.completeLayout(as: false)
+check(!asyncController.isApplying && asyncController.pendingHiddenTarget == nil && !asyncController.hidden,
+      "the current reveal completion settles the pending state")
+
+asyncController.hide()
+asyncController.reveal()
+asyncRuntime.completeLayout(at: 1, as: false)
+asyncController.hide()
+asyncRuntime.completeLayout(at: 0, as: false)
+check(asyncController.isApplying && asyncController.pendingHiddenTarget == true && !asyncController.hidden,
+      "a late failure from an older hide cannot cancel a newer pending hide")
+asyncRuntime.completeLayout(as: true)
+check(asyncController.hidden && !asyncController.isApplying,
+      "only the current successful hide completion publishes hidden state")
+
+asyncController.reveal()
+asyncRuntime.completeLayout(as: false)
+asyncController.hide()
+asyncController.setSettingsOpen(true)
+asyncRuntime.completeLayout(at: 0, as: true)
+check(asyncController.settingsOpen && asyncController.isApplying &&
+      asyncController.pendingHiddenTarget == false && !asyncController.hidden,
+      "opening settings invalidates an in-flight hide and keeps icons revealed")
+asyncRuntime.completeLayout(as: false)
+check(!asyncController.isApplying && !asyncController.hidden,
+      "settings reveal settles only from its current completion")
+asyncController.setSettingsOpen(false)
+
+asyncController.hide()
+asyncController.setEnabled(false)
+check(!asyncController.enabled && !asyncController.isRunning && !asyncController.isApplying &&
+      asyncController.pendingHiddenTarget == nil && !asyncController.hidden &&
+      asyncRuntime.pendingLayouts.map(\.requestedHidden).suffix(2) == [true, false],
+      "disabling requests an immediate clear and resets pending controller state")
+asyncRuntime.completeLayout(at: asyncRuntime.pendingLayouts.count - 2, as: true)
+asyncRuntime.completeLayout(at: asyncRuntime.pendingLayouts.count - 1, as: false)
+check(!asyncController.isRunning && !asyncController.hidden && !asyncController.isApplying,
+      "late disable callbacks cannot restore hidden or pending state")
+
+let shutdownSuite = suite + ".async-shutdown"
+let shutdownDefaults = UserDefaults(suiteName: shutdownSuite)!
+defer { shutdownDefaults.removePersistentDomain(forName: shutdownSuite) }
+shutdownDefaults.set(true, forKey: "organizer.enabled")
+shutdownDefaults.set(true, forKey: "organizer.hasCompletedSetup")
+shutdownDefaults.set(false, forKey: "organizer.startHidden")
+let shutdownRuntime = TestRuntime()
+let shutdownController = MenuBarOrganizerController(defaults: shutdownDefaults, runtime: shutdownRuntime,
+    now: { now }, schedule: TestScheduler().schedule)
+shutdownController.configure(anchor: anchor) {}
+shutdownRuntime.holdLayoutCompletions = true
+shutdownController.hide()
+shutdownController.shutdown()
+check(shutdownController.enabled && !shutdownController.isRunning && !shutdownController.isApplying &&
+      !shutdownController.hidden && shutdownRuntime.pendingLayouts.map(\.requestedHidden) == [true, false],
+      "shutdown clears a pending hide without changing the enabled preference")
+shutdownRuntime.completeLayout(at: 0, as: true)
+shutdownRuntime.completeLayout(as: false)
+check(!shutdownController.isRunning && !shutdownController.hidden && !shutdownController.isApplying,
+      "callbacks arriving after shutdown remain inert")
+
+let capabilitySuite = suite + ".capability-refresh"
+let capabilityDefaults = UserDefaults(suiteName: capabilitySuite)!
+defer { capabilityDefaults.removePersistentDomain(forName: capabilitySuite) }
+capabilityDefaults.set(true, forKey: "organizer.enabled")
+capabilityDefaults.set(true, forKey: "organizer.hasCompletedSetup")
+capabilityDefaults.set(false, forKey: "organizer.autoHide")
+capabilityDefaults.set(false, forKey: "organizer.startHidden")
+let capabilityRuntime = TestRuntime()
+capabilityRuntime.hidingUnavailableReason = "Menu bar verification is required"
+let capabilityController = MenuBarOrganizerController(defaults: capabilityDefaults, runtime: capabilityRuntime,
+    now: { now }, schedule: TestScheduler().schedule)
+capabilityController.configure(anchor: anchor) {}
+check(capabilityController.isRunning && !capabilityController.shortcutAvailable &&
+      capabilityRuntime.activeShortcut == nil,
+      "unavailable hiding starts without registering a dead shortcut")
+capabilityRuntime.hidingUnavailableReason = nil
+capabilityController.refreshCapabilities()
+check(capabilityRuntime.capabilityRefreshes == 1 && capabilityController.isRunning &&
+      capabilityRuntime.starts == 1 && capabilityController.shortcutAvailable &&
+      capabilityRuntime.activeShortcut == .standard,
+      "newly available capability registers the saved shortcut without restarting")
+
+capabilityController.hide()
+check(capabilityController.hidden, "capability fixture reaches a verified hidden state")
+capabilityRuntime.hidingUnavailableReason = "Menu bar verification is required"
+capabilityController.refreshCapabilities()
+check(!capabilityController.hidden && !capabilityController.isApplying &&
+      !capabilityController.shortcutAvailable && capabilityRuntime.activeShortcut == nil &&
+      capabilityRuntime.layouts.suffix(2) == [true, false],
+      "capability loss while hidden reveals icons and unregisters the shortcut")
+
+capabilityRuntime.hidingUnavailableReason = nil
+capabilityController.refreshCapabilities()
+capabilityRuntime.holdLayoutCompletions = true
+capabilityController.hide()
+check(capabilityController.isApplying && capabilityController.pendingHiddenTarget == true,
+      "capability fixture holds a hide verification in flight")
+capabilityRuntime.hidingUnavailableReason = "Menu bar verification is required"
+capabilityController.refreshCapabilities()
+check(capabilityController.isApplying && capabilityController.pendingHiddenTarget == false &&
+      !capabilityController.hidden && !capabilityController.shortcutAvailable &&
+      capabilityRuntime.activeShortcut == nil &&
+      capabilityRuntime.pendingLayouts.map(\.requestedHidden) == [true, false],
+      "capability loss cancels a pending hide toward reveal and unregisters the shortcut")
+capabilityRuntime.completeLayout(at: 0, as: true)
+check(capabilityController.isApplying && !capabilityController.hidden,
+      "stale hide success after capability loss cannot publish hidden state")
+capabilityRuntime.completeLayout(as: false)
+check(!capabilityController.isApplying && !capabilityController.hidden,
+      "current reveal completion settles capability loss safely")
+
+capabilityRuntime.holdLayoutCompletions = false
+capabilityController.setEnabled(false)
+let disabledCapabilityRefreshes = capabilityRuntime.capabilityRefreshes
+let disabledCapabilityLayouts = capabilityRuntime.layouts.count
+capabilityRuntime.hidingUnavailableReason = nil
+capabilityController.refreshCapabilities()
+check(capabilityRuntime.capabilityRefreshes == disabledCapabilityRefreshes &&
+      capabilityRuntime.layouts.count == disabledCapabilityLayouts &&
+      !capabilityController.isRunning && !capabilityController.shortcutAvailable,
+      "disabled capability refresh performs no runtime or controller work")
+
+let trialSuite = suite + ".verified-trial"
+let trialDefaults = UserDefaults(suiteName: trialSuite)!
+defer { trialDefaults.removePersistentDomain(forName: trialSuite) }
+trialDefaults.set(true, forKey: "organizer.enabled")
+let trialRuntime = TestRuntime()
+trialRuntime.requiresVisibilityConfirmation = true
+trialRuntime.requiresDedicatedArrow = true
+let trialController = MenuBarOrganizerController(defaults: trialDefaults, runtime: trialRuntime,
+    now: { now }, schedule: TestScheduler().schedule)
+trialController.configure(anchor: anchor) {}
+check(trialController.requiresDedicatedArrow && trialController.showSeparateToggle,
+      "a runtime requiring native recovery forces the dedicated arrow on activation")
+trialController.hide()
+check(trialController.hidden && !trialController.hasVisibilityTrial,
+      "successful hiding alone never confirms recovery control visibility")
+trialController.reveal()
+check(!trialController.hidden && !trialController.hasVisibilityTrial,
+      "a non-menu-bar reveal does not confirm the native recovery control")
+trialController.hide()
+trialController.toggleHiddenItems()
+check(!trialController.hidden && !trialController.hasVisibilityTrial,
+      "a generic toggle reveal does not confirm the native recovery control")
+trialController.hide()
+trialRuntime.holdLayoutCompletions = true
+trialController.toggleFromMenuBarControl()
+check(trialController.isApplying && !trialController.hidden && !trialController.hasVisibilityTrial,
+      "native recovery click waits for verified reveal before recording a trial")
+trialRuntime.completeLayout(as: false)
+check(!trialController.isApplying && trialController.hasVisibilityTrial,
+      "verified reveal from the native recovery control records the visibility trial")
+
 check(!MenuBarShortcut(keyCode: 16, modifiers: MenuBarShortcut.command | MenuBarShortcut.shift, label: "Y").isValid,
       "shelf shortcut Command Shift Y is reserved")
 for candidate in [MenuBarShortcut(keyCode: 53, modifiers: MenuBarShortcut.control, label: "Esc"),
@@ -256,6 +459,13 @@ for candidate in [MenuBarShortcut(keyCode: 53, modifiers: MenuBarShortcut.contro
     check(!candidate.isValid, "invalid focused shortcut is rejected")
 }
 check(MenuBarShortcut.standard.display == "⌃⌥H", "shortcut display reflects Carbon modifiers")
+check(MenuBarNativeLayout.width(usableWidth: 762.5) == 317,
+      "validated native display uses the single-divider trial width")
+for invalid in [Double.nan, .infinity, -1, 0, 100, 1e100] {
+    check(MenuBarNativeLayout.width(usableWidth: invalid) == nil,
+          "invalid or unsupported native space cannot expand the divider")
+}
+
 for displays in [[], [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5)],
                  [MenuBarDisplayWidth(width: 2056)],
                  [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 7680)]] {
@@ -357,19 +567,33 @@ check(!confirmation.hidden && !confirmation.hasVisibilityTrial,
       "unconfirmed trial requires the settings recovery window")
 confirmationRuntime.allowsVisibilityTrial = true
 confirmation.hide()
-check(confirmation.hidden && confirmation.hasVisibilityTrial, "accepted remote-host request records a trial awaiting manual verification")
+check(confirmation.hidden && !confirmation.hasVisibilityTrial,
+      "accepted hide remains unconfirmed until the native recovery control reveals icons")
+confirmation.toggleFromMenuBarControl()
+check(!confirmation.hidden && confirmation.hasVisibilityTrial,
+      "native recovery control records the trial only after revealing icons")
 confirmation.rejectVisibilityTrial()
 check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
       "failed post-layout recovery invalidates the trial before confirmation")
 confirmation.hide()
+confirmation.expireVisibilityTrial()
+check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
+      "an unconfirmed trial timeout restores icons and keeps setup pending")
+confirmation.hide()
+confirmation.toggleFromMenuBarControl()
 confirmationRuntime.requiresVisibilityConfirmation = false
 confirmation.refreshVisibilityRequirement()
 check(confirmation.requiresVisibilityConfirmation && confirmation.hasVisibilityTrial,
       "temporary remote-host capability changes preserve pending manual confirmation and the trial")
 confirmationRuntime.requiresVisibilityConfirmation = true
-confirmation.reveal(); confirmation.completeSetup()
-check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && !confirmationScheduler.entries.isEmpty,
-      "explicit confirmation after trial unlocks automatic hiding")
+confirmation.reveal(); confirmation.hide(); confirmation.completeSetup()
+check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && confirmation.hidden,
+      "explicit confirmation while hidden completes a successful arrow trial")
+confirmation.expireVisibilityTrial()
+check(confirmation.hidden && confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation,
+      "an old trial timeout cannot undo a layout that has already been confirmed")
+confirmation.reveal()
+check(!confirmationScheduler.entries.isEmpty, "confirmed layout schedules automatic hiding after reveal")
 confirmation.shutdown()
 let restoredConfirmation = MenuBarOrganizerController(defaults: confirmationDefaults, runtime: confirmationRuntime,
     now: { now }, schedule: confirmationScheduler.schedule)
@@ -381,7 +605,7 @@ check(restoredConfirmation.requiresVisibilityConfirmation && !restoredConfirmati
       "toggle topology changes reveal and invalidate confirmation")
 restoredConfirmation.completeSetup()
 check(!restoredConfirmation.hasCompletedSetup, "previous generic setup cannot bypass a changed-layout trial")
-restoredConfirmation.hide(); restoredConfirmation.reveal(); restoredConfirmation.completeSetup()
+restoredConfirmation.hide(); restoredConfirmation.toggleFromMenuBarControl(); restoredConfirmation.completeSetup()
 confirmationRuntime.displaySignature = "changed-display"
 NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
 try? await Task.sleep(nanoseconds: 20_000_000)

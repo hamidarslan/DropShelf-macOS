@@ -39,20 +39,22 @@ DropShelf performs local file processing without an analytics client. The build 
 
 ## Menu bar organizer
 
-On macOS 13 through 26, open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switch is remembered: while enabled, the organizer starts whenever DropShelf runs. Turning it off removes its divider, reveal controls, timers, and shortcut while keeping your preferences for next time.
+Open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switch is remembered: while enabled, the organizer starts whenever DropShelf runs. Turning it off reveals icons and removes the organizer's controls, timers, and shortcut while preserving your preferences.
 
-The setup guide reveals your icons while you arrange them. Hold Command and drag less-used icons to the left of the divider; keep DropShelf and essential icons on its right. Complete setup to resume automatic hiding. The organizer changes space in the actual macOS menu bar; it does not copy other apps' icons into the shelf.
+Hold Command and drag less-used icons to the left of the divider in the real menu bar. Keep DropShelf and the single arrow on its right. Click the arrow to hide the chosen icons, then click it again to reveal them.
 
-**On macOS 27 and later, organizer hiding is unavailable.** The changed system layout can push the reveal arrow into overflow along with other icons. DropShelf keeps icons visible, preserves your organizer preferences, and leaves its file and clipboard tools available. The organizer sequence in the demonstration applies to macOS 13 through 26.
+On macOS 27 and later, enable **menu bar verification** when prompted from Settings. This requires Accessibility permission so DropShelf can locate its controls in the system menu bar and check that the arrow remains reachable. The check reads menu-bar layout only; it does not record the screen, perform Accessibility clicks, or upload data. Older supported macOS versions retain the existing native placement checks without this permission.
+
+The first hide test automatically reveals icons after ten seconds. Use the actual menu-bar arrow to reveal them before completing setup. An OS or display change requires a new check. If the arrow cannot be verified during operation, DropShelf restores the icons. Future macOS changes can require compatibility updates; a failed check keeps icons visible.
 
 - Click DropShelf normally to toggle the shelf. Option-click toggles hidden menu bar icons while the organizer is enabled.
-- Right-click for organizer controls, pauses, and settings. A separate reveal button is optional.
+- Right-click for organizer controls, pauses, and settings. The dedicated arrow remains enabled on macOS 27 and later.
 - The organizer shortcut defaults to **Control + Option + H** and can be changed or disabled. The shelf keeps **Command + Shift + Y**.
 - Choose an auto-hide delay of 5, 10, 15, 30, or 60 seconds. Hiding waits while you use the menu bar, hold a mouse button, arrange icons, or keep Menu Bar settings open.
 - Keep icons visible for 5 minutes, 1 hour, or until resumed. A temporary reveal or pause does not turn the organizer off.
 - Reopen DropShelf from Applications to reveal icons and recover the organizer settings. Quitting removes its status items without forgetting the enabled setting.
 
-The organizer runs locally and adds no Accessibility, Screen Recording, or Input Monitoring permission. It uses DropShelf's existing login setting. Menu-bar space, system-owned icons, and notched or multiple displays remain subject to macOS layout rules. If another menu bar organizer is running, use one organizer at a time and choose a free shortcut.
+The organizer uses DropShelf's existing login setting and runs locally. Menu-bar space, system-owned icons, and notched or multiple displays remain subject to macOS layout rules. Use one menu bar organizer at a time and choose a free shortcut. Ad-hoc signed app updates may require renewing Accessibility access in System Settings.
 
 ## Clipboard history
 
