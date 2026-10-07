@@ -52,27 +52,10 @@ struct MenuBarDisplayWidth {
 
 enum MenuBarSpacerLayout {
     static func lengths(displays: [MenuBarDisplayWidth], modern: Bool) -> [Double] {
-        if !modern {
-            let widths = displays.map(\.width).filter { $0.isFinite && $0 > 0 }
-            let widest = widths.max() ?? 1440
-            return [min(10_000, max(500, widest * 2))]
-        }
-        guard !displays.isEmpty else { return [] }
-        var smallestCliff = Double.infinity
-        var widestStatusArea = 0.0
-        for display in displays {
-            guard display.width.isFinite, display.width > 0 else { return [] }
-            let statusWidth = display.usableRightWidth ?? display.width
-            guard statusWidth.isFinite, statusWidth > 0, statusWidth <= display.width else { return [] }
-            let cliff = statusWidth < display.width ? statusWidth * 0.75 : display.width * 0.5
-            smallestCliff = min(smallestCliff, cliff)
-            widestStatusArea = max(widestStatusArea, statusWidth)
-        }
-        let unit = floor(smallestCliff - 64)
-        guard unit.isFinite, unit >= 40, unit < smallestCliff else { return [] }
-        let required = ceil(widestStatusArea / unit)
-        guard required.isFinite, required >= 1, required <= 16 else { return [] }
-        return Array(repeating: unit, count: Int(required))
+        guard !modern else { return [] }
+        let widths = displays.map(\.width).filter { $0.isFinite && $0 > 0 }
+        let widest = widths.max() ?? 1440
+        return [min(10_000, max(500, widest * 2))]
     }
 }
 
@@ -81,11 +64,6 @@ enum MenuBarOrganizerGeometry {
         guard let rect, [rect.minX, rect.minY, rect.width, rect.height].allSatisfy({ $0.isFinite }),
               rect.width > 0, rect.height > 0 else { return false }
         return screen.insetBy(dx: -1, dy: -1).contains(rect)
-    }
-    static func hasSyntheticHosts(majorVersion: Int, windowIDs: [Int], distinctItems: Bool) -> Bool {
-        majorVersion == 27 && distinctItems && windowIDs.count >= 2 && windowIDs.count <= 3
-            && Set(windowIDs).count == windowIDs.count
-            && windowIDs.allSatisfy { $0 > Int(UInt32.max) && $0 & 0xFFFF_FFFF == 0 }
     }
     static func canHide(anchor: CGRect?, divider: CGRect?, toggle: CGRect?, screen: CGRect,
                         requiresToggle: Bool) -> Bool {

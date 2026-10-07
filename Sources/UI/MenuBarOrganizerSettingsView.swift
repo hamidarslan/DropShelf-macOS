@@ -16,7 +16,7 @@ struct MenuBarOrganizerSettingsView: View {
                 }
 
                 card {
-                    switchRow("Manage menu bar icons", detail: organizer.enabled ? "Starts with DropShelf whenever enabled." : "Off stays off each time DropShelf starts.", binding: Binding(
+                    switchRow("Manage menu bar icons", detail: !organizer.hidingAvailable ? "Preference saved. Hiding is unavailable on this macOS version." : organizer.enabled ? "Starts with DropShelf whenever enabled." : "Off stays off each time DropShelf starts.", binding: Binding(
                         get: { organizer.enabled }, set: { organizer.setEnabled($0) }
                     ), status: organizer.enabled ? "On" : "Off")
                 }
@@ -36,7 +36,16 @@ struct MenuBarOrganizerSettingsView: View {
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.warm.opacity(0.2), lineWidth: 1))
                 }
 
-                if organizer.enabled && (!organizer.hasCompletedSetup || organizer.isArranging || organizer.requiresVisibilityConfirmation) {
+                if let reason = organizer.hidingUnavailableReason {
+                    Label(reason, systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundColor(palette.warm)
+                        .padding(14)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(palette.warm.opacity(0.08)))
+                }
+
+                if organizer.enabled && organizer.hidingAvailable && (!organizer.hasCompletedSetup || organizer.isArranging || organizer.requiresVisibilityConfirmation) {
                     setupGuide
                 }
 
@@ -61,8 +70,8 @@ struct MenuBarOrganizerSettingsView: View {
                         switchRow("Start with icons hidden", detail: "Gives your menu bar 15 seconds to settle.", binding: $organizer.startHidden)
                     }
                 }
-                .disabled(!organizer.enabled)
-                .opacity(organizer.enabled ? 1 : 0.55)
+                .disabled(!organizer.enabled || !organizer.hidingAvailable)
+                .opacity(organizer.enabled && organizer.hidingAvailable ? 1 : 0.55)
 
                 VStack(alignment: .leading, spacing: 8) {
                     sectionLabel("Access")
@@ -100,20 +109,20 @@ struct MenuBarOrganizerSettingsView: View {
                         switchRow("Separate reveal button", detail: "Adds a small chevron beside DropShelf.", binding: $organizer.showSeparateToggle)
                     }
                 }
-                .disabled(!organizer.enabled)
-                .opacity(organizer.enabled ? 1 : 0.55)
+                .disabled(!organizer.enabled || !organizer.hidingAvailable)
+                .opacity(organizer.enabled && organizer.hidingAvailable ? 1 : 0.55)
 
-                if organizer.enabled {
+                if organizer.enabled && organizer.hidingAvailable {
                     controls
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    if organizer.enabled && !organizer.statusMessage.isEmpty {
+                    if organizer.enabled && organizer.hidingAvailable && !organizer.statusMessage.isEmpty {
                         Label(organizer.statusMessage, systemImage: organizer.isPaused ? "pause.circle" : "info.circle")
                             .font(.system(size: 11))
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(organizer.enabled ? "Option-click DropShelf to show or hide icons. Its regular click still opens the shelf." : "Turn on to arrange your menu bar. Your choice and settings are remembered across launches.")
+                    Text(!organizer.hidingAvailable ? "Your organizer preferences are saved. DropShelf's file and clipboard tools remain available." : organizer.enabled ? "Option-click DropShelf to show or hide icons. Its regular click still opens the shelf." : "Turn on to arrange your menu bar. Your choice and settings are remembered across launches.")
                         .font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
                     Label("Works locally. No additional permissions.", systemImage: "lock.shield")
@@ -125,13 +134,18 @@ struct MenuBarOrganizerSettingsView: View {
         }
         .tint(palette.accent)
         .onAppear {
+            organizer.setSettingsOpen(true)
             if organizer.enabled && !organizer.hasCompletedSetup { organizer.beginArranging() }
         }
         .onChange(of: organizer.enabled) { enabled in
-            if enabled && !organizer.hasCompletedSetup { organizer.beginArranging() }
+            if enabled {
+                organizer.setSettingsOpen(true)
+                if !organizer.hasCompletedSetup { organizer.beginArranging() }
+            }
         }
         .onDisappear {
             organizer.endArranging()
+            organizer.setSettingsOpen(false)
             organizer.cancelShortcutRecording()
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: organizer.enabled)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1
+
+- Keep menu bar icons visible on macOS 27 and later, where the previous hiding layout could also hide DropShelf's reveal arrow. Organizer hiding is unavailable on these versions pending a compatible implementation.
+- Remove the unsupported spacer pool and explain the limitation in Menu Bar settings while preserving saved preferences.
+- Hold automatic hiding while Menu Bar settings are open. Manual hide trials remain available on supported macOS versions.
+
 ## 1.6.0
 
 - Add an optional menu bar organizer with an on/off preference that persists across launches.
