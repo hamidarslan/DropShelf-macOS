@@ -189,9 +189,10 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
             self.startGuard(epoch: epoch)
             if self.controller?.requiresVisibilityConfirmation == true {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
-                    guard let self, self.layoutEpoch == epoch, self.controller?.hidden == true else { return }
+                    guard let self, self.layoutEpoch == epoch, self.controller?.hidden == true,
+                          self.controller?.requiresVisibilityConfirmation == true else { return }
                     self.layoutMessage = "The test ended. Click the menu bar arrow to hide, then click it again to reveal."
-                    self.controller?.rejectVisibilityTrial()
+                    self.controller?.expireVisibilityTrial()
                 }
             }
         }

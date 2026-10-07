@@ -576,15 +576,24 @@ confirmation.rejectVisibilityTrial()
 check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
       "failed post-layout recovery invalidates the trial before confirmation")
 confirmation.hide()
+confirmation.expireVisibilityTrial()
+check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
+      "an unconfirmed trial timeout restores icons and keeps setup pending")
+confirmation.hide()
 confirmation.toggleFromMenuBarControl()
 confirmationRuntime.requiresVisibilityConfirmation = false
 confirmation.refreshVisibilityRequirement()
 check(confirmation.requiresVisibilityConfirmation && confirmation.hasVisibilityTrial,
       "temporary remote-host capability changes preserve pending manual confirmation and the trial")
 confirmationRuntime.requiresVisibilityConfirmation = true
-confirmation.reveal(); confirmation.completeSetup()
-check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && !confirmationScheduler.entries.isEmpty,
-      "explicit confirmation after trial unlocks automatic hiding")
+confirmation.reveal(); confirmation.hide(); confirmation.completeSetup()
+check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && confirmation.hidden,
+      "explicit confirmation while hidden completes a successful arrow trial")
+confirmation.expireVisibilityTrial()
+check(confirmation.hidden && confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation,
+      "an old trial timeout cannot undo a layout that has already been confirmed")
+confirmation.reveal()
+check(!confirmationScheduler.entries.isEmpty, "confirmed layout schedules automatic hiding after reveal")
 confirmation.shutdown()
 let restoredConfirmation = MenuBarOrganizerController(defaults: confirmationDefaults, runtime: confirmationRuntime,
     now: { now }, schedule: confirmationScheduler.schedule)

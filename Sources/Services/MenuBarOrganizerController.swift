@@ -451,6 +451,10 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         updateStatus()
         if invalidated && requestSettings { showSettings?() }
     }
+    func expireVisibilityTrial() {
+        guard enabled, isRunning, hidden, requiresVisibilityConfirmation else { return }
+        rejectVisibilityTrial()
+    }
     func rejectVisibilityTrial() {
         hasVisibilityTrial = false
         if usesVisibilityConfirmation { defaults.removeObject(forKey: "organizer.visibilityConfirmation") }
