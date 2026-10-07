@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon
 import Combine
 
@@ -21,17 +22,26 @@ protocol MenuBarOrganizerRuntime: AnyObject {
     var displaySignature: String { get }
     var conflictMessage: String { get }
     var hidingUnavailableReason: String? { get }
+    var requiresAccessibilityVerification: Bool { get }
+    var requiresDedicatedArrow: Bool { get }
     var requiresVisibilityConfirmation: Bool { get }
     var allowsVisibilityTrial: Bool { get }
     var platformSignature: String { get }
     var conflictingOrganizerRunning: Bool { get }
     func quitConflictingOrganizer() -> Bool
+    func refreshCapabilities()
     func start(anchor: NSStatusItem, controller: MenuBarOrganizerController)
     func stop()
-    @discardableResult func apply(hidden: Bool, separateToggle: Bool) -> Bool
+    func apply(hidden: Bool, separateToggle: Bool, completion: @escaping @MainActor (Bool) -> Void)
     func registerShortcut(_ shortcut: MenuBarShortcut) -> Bool
     func unregisterShortcut()
     func allowsHiding() -> Bool
+}
+
+extension MenuBarOrganizerRuntime {
+    var requiresAccessibilityVerification: Bool { false }
+    var requiresDedicatedArrow: Bool { false }
+    func refreshCapabilities() {}
 }
 
 @MainActor
@@ -39,9 +49,13 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     static let shared = MenuBarOrganizerController(defaults: .standard)
     var hidingUnavailableReason: String? { runtime.hidingUnavailableReason }
     var hidingAvailable: Bool { hidingUnavailableReason == nil }
+    var requiresAccessibilityVerification: Bool { runtime.requiresAccessibilityVerification }
+    var requiresDedicatedArrow: Bool { runtime.requiresDedicatedArrow }
     @Published private(set) var enabled: Bool
     @Published private(set) var isRunning = false
     @Published private(set) var hidden = false
+    @Published private(set) var isApplying = false
+    @Published private(set) var pendingHiddenTarget: Bool?
     @Published private(set) var isArranging = false
     @Published private(set) var settingsOpen = false
     @Published private(set) var hasCompletedSetup: Bool
@@ -81,7 +95,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
                     defaults.removeObject(forKey: "organizer.visibilityConfirmation")
                     reveal()
                     refreshVisibilityRequirement(requestSettings: true)
-                } else { hidden = runtime.apply(hidden: hidden, separateToggle: showSeparateToggle); updateStatus() }
+                } else { applyLayout(hidden: hidden, resumeAutoHideWhenVisible: !hidden) }
             }
         }
     }
@@ -100,6 +114,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     private var startupDeadline: Date?
     private var generation: UInt64 = 0
     private var layoutGeneration: UInt64 = 0
+    private var applyEpoch: UInt64 = 0
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var displaySignature = ""
     private var activeVisibilityScope = ""
@@ -152,14 +167,15 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     }
     private func activate() {
         guard enabled, !isRunning, let anchor else { return }
+        if runtime.requiresDedicatedArrow && !showSeparateToggle { showSeparateToggle = true }
         generation &+= 1
         isRunning = true; hidden = false
         runtime.start(anchor: anchor, controller: self)
-        runtime.apply(hidden: false, separateToggle: showSeparateToggle)
+        applyLayout(hidden: false, resumeAutoHideWhenVisible: true)
         displaySignature = runtime.displaySignature
         refreshVisibilityRequirement()
         installObservers()
-        if !hidingAvailable { shortcutMessage = "Menu bar hiding is unavailable on this macOS version" }
+        if !hidingAvailable { shortcutMessage = runtime.requiresAccessibilityVerification ? "Enable menu bar verification to use the shortcut" : "Menu bar hiding is unavailable on this macOS version" }
         else if shortcutEnabled { setShortcut(shortcut) }
         else { shortcutMessage = "Shortcut is turned off" }
         updateStatus()
@@ -175,6 +191,8 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         cancelHide()
         pauseTask?.cancel(); pauseTask = nil
         observers.forEach { $0.0.removeObserver($0.1) }; observers.removeAll()
+        applyLayout(hidden: false)
+        invalidatePendingApply()
         runtime.stop()
         isRunning = false; hidden = false; isArranging = false; menuOpen = false; startupDeadline = nil
         pause = .none; updatePause()
@@ -184,6 +202,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     func toggleHiddenItems() {
         guard enabled && isRunning else { return }
         guard hidingAvailable else { reveal(); showSettings?(); return }
+        if isApplying { reveal(); return }
         if hidden {
             reveal()
         } else {
@@ -192,13 +211,16 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         }
     }
     func reveal() {
+        reveal(confirmingVisibilityTrial: false)
+    }
+    private func reveal(confirmingVisibilityTrial: Bool) {
         guard enabled && isRunning else { return }
-        startupDeadline = nil; cancelHide(); hidden = false
-        runtime.apply(hidden: false, separateToggle: showSeparateToggle)
-        updateStatus(); scheduleAutoHide()
+        startupDeadline = nil; cancelHide()
+        applyLayout(hidden: false, resumeAutoHideWhenVisible: true,
+                    confirmsVisibilityTrial: confirmingVisibilityTrial)
     }
     func hide() {
-        guard enabled && isRunning, !isArranging else { return }
+        guard enabled && isRunning, !isArranging, !isApplying else { return }
         guard hidingAvailable else { reveal(); updateStatus(); return }
         refreshConflictingOrganizerState()
         guard !conflictingOrganizerRunning else { updateStatus(); return }
@@ -208,10 +230,19 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
             showSettings?(); return
         }
         startupDeadline = nil; cancelHide(); pauseTask?.cancel(); pauseTask = nil
-        pause = .none; updatePause(); hidden = true
-        hidden = runtime.apply(hidden: true, separateToggle: showSeparateToggle)
-        if hidden && requiresVisibilityConfirmation { hasVisibilityTrial = true }
-        updateStatus()
+        pause = .none; updatePause()
+        applyLayout(hidden: true)
+    }
+    func toggleFromMenuBarControl() {
+        guard enabled && isRunning else { return }
+        guard hidingAvailable else { reveal(); showSettings?(); return }
+        if isApplying { reveal(); return }
+        if hidden {
+            reveal(confirmingVisibilityTrial: requiresVisibilityConfirmation)
+        } else {
+            if isArranging { endArranging() }
+            hide()
+        }
     }
     func beginArranging() {
         guard enabled && isRunning && hidingAvailable else { return }
@@ -232,6 +263,25 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
             settingsOpen = false
             scheduleAutoHide()
         }
+    }
+    func refreshCapabilities() {
+        guard enabled && isRunning else { return }
+        runtime.refreshCapabilities()
+        if !hidingAvailable {
+            if hidden || isApplying { reveal() }
+            runtime.unregisterShortcut(); shortcutAvailable = false
+            shortcutMessage = "Enable menu bar verification to use the shortcut"
+        } else if shortcutEnabled && !shortcutAvailable && !conflictingOrganizerRunning {
+            setShortcut(shortcut)
+        }
+        refreshVisibilityRequirement()
+        updateStatus()
+    }
+    func requestAccessibilityVerification() {
+        guard runtime.requiresAccessibilityVerification else { return }
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+        updateStatus()
     }
     func completeSetup() {
         guard enabled && isRunning && hidingAvailable else { return }
@@ -281,10 +331,36 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         if !value { scheduleAutoHide() }
     }
     private func cancelHide() { layoutGeneration &+= 1; hideTask?.cancel(); hideTask = nil }
+    private func invalidatePendingApply() {
+        applyEpoch &+= 1
+        isApplying = false
+        pendingHiddenTarget = nil
+        hidden = false
+    }
+    private func applyLayout(hidden target: Bool, resumeAutoHideWhenVisible: Bool = false,
+                             confirmsVisibilityTrial: Bool = false) {
+        applyEpoch &+= 1
+        let epoch = applyEpoch
+        isApplying = true
+        pendingHiddenTarget = target
+        hidden = false
+        updateStatus()
+        runtime.apply(hidden: target, separateToggle: showSeparateToggle) { [weak self] actualHidden in
+            guard let self, self.applyEpoch == epoch else { return }
+            self.isApplying = false
+            self.pendingHiddenTarget = nil
+            self.hidden = target && actualHidden
+            if confirmsVisibilityTrial && !target && !actualHidden && self.requiresVisibilityConfirmation {
+                self.hasVisibilityTrial = true
+            }
+            self.updateStatus()
+            if resumeAutoHideWhenVisible && !self.hidden { self.scheduleAutoHide() }
+        }
+    }
     private func scheduleAutoHide() {
         cancelHide()
         guard enabled, isRunning, hidingAvailable, hasCompletedSetup, !requiresVisibilityConfirmation, !hidden, !isArranging,
-              !settingsOpen, !pause.isActive(at: now()) else { return }
+              !isApplying, !settingsOpen, !pause.isActive(at: now()) else { return }
         if let startupDeadline {
             scheduleHide(after: max(0.1, startupDeadline.timeIntervalSince(now())), startup: true)
         } else if autoHide { scheduleHide(after: delay, startup: false) }
@@ -295,7 +371,8 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         hideTask = schedule(seconds) { [weak self] in
             guard let self, self.enabled, self.isRunning, self.hidingAvailable, self.generation == epoch,
                   self.layoutGeneration == layoutEpoch, self.hasCompletedSetup,
-                  !self.hidden, !self.isArranging, !self.settingsOpen, !self.pause.isActive(at: self.now()),
+                  !self.hidden, !self.isApplying, !self.isArranging, !self.settingsOpen,
+                  !self.pause.isActive(at: self.now()),
                   startup || self.autoHide else { return }
             self.refreshVisibilityRequirement(requestSettings: true)
             guard !self.requiresVisibilityConfirmation else { return }
@@ -328,7 +405,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
             self?.refreshPause(); self?.recoverAfterDisplayChange()
         }
         observe(.default, NSApplication.didBecomeActiveNotification) { [weak self] in
-            self?.refreshConflictingOrganizerState(); self?.refreshVisibilityRequirement(); self?.refreshPause()
+            self?.refreshConflictingOrganizerState(); self?.refreshCapabilities(); self?.refreshPause()
         }
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             let center = NSWorkspace.shared.notificationCenter
@@ -351,7 +428,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         }
     }
     private var visibilityScope: String {
-        "\(runtime.platformSignature)|\(runtime.displaySignature)|toggle=\(showSeparateToggle)|verification=native-segments-v2"
+        "\(runtime.platformSignature)|\(runtime.displaySignature)|toggle=\(showSeparateToggle)|verification=native-single-divider-v3"
     }
     func refreshVisibilityRequirement(requestSettings: Bool = false) {
         guard enabled && isRunning else { return }
@@ -368,8 +445,8 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         if invalidated {
             hasVisibilityTrial = false; hasCompletedSetup = false
             defaults.set(false, forKey: "organizer.hasCompletedSetup")
-            startupDeadline = nil; cancelHide(); hidden = false
-            runtime.apply(hidden: false, separateToggle: showSeparateToggle)
+            startupDeadline = nil; cancelHide()
+            applyLayout(hidden: false)
         }
         updateStatus()
         if invalidated && requestSettings { showSettings?() }
@@ -430,6 +507,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         guard enabled && isRunning else { statusMessage = enabled ? "Organizer starts when DropShelf is ready" : "Menu bar organizer is off"; return }
         if let reason = hidingUnavailableReason { statusMessage = reason }
         else if !runtime.conflictMessage.isEmpty { statusMessage = runtime.conflictMessage }
+        else if isApplying { statusMessage = "Checking menu bar controls…" }
         else if requiresVisibilityConfirmation {
             statusMessage = hasVisibilityTrial ? "Check that icons hide and the menu bar control stays visible" : "Try hiding, then check your menu bar control"
         }
@@ -507,204 +585,9 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     @objc private func timedPauseAction(_ item: NSMenuItem) { pauseHiding(seconds: Double(item.tag)) }
     @objc private func resumeAction() { resumeHiding() }
     @objc private func settingsAction() { showSettings?() }
-    @objc fileprivate func dividerAction() { showSettings?() }
-    @objc fileprivate func separateToggleAction() {
+    @objc func dividerAction() { showSettings?() }
+    @objc func separateToggleAction() {
         if NSApp.currentEvent?.type == .rightMouseUp { showSettings?() }
-        else { toggleHiddenItems() }
-    }
-}
-
-@MainActor
-private final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
-    private var divider: NSStatusItem?
-    private var separateToggle: NSStatusItem?
-    private weak var controller: MenuBarOrganizerController?
-    private weak var anchor: NSStatusItem?
-    private var layoutMessage = ""
-    private var layoutEpoch: UInt64 = 0
-    private var runEpoch: UInt64 = 0
-    private var hotKey: EventHotKeyRef?
-    private var handler: EventHandlerRef?
-    private let signature: OSType = 0x44534D42
-    private var modern: Bool { ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 }
-    var hidingUnavailableReason: String? {
-        modern ? "Menu bar hiding is unavailable on macOS 27 or later. Your icons are kept visible because this system can hide the reveal arrow as well." : nil
-    }
-    var conflictingOrganizerRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: "local.hidebar.app").isEmpty
-    }
-    var conflictMessage: String {
-        if conflictingOrganizerRunning { return "Hidebar is running. Use one organizer at a time." }
-        return layoutMessage
-    }
-    var platformSignature: String { ProcessInfo.processInfo.operatingSystemVersionString }
-    var requiresVisibilityConfirmation: Bool { false }
-    var allowsVisibilityTrial: Bool {
-        NSApp.windows.contains { $0.isVisible && $0.title == "DropShelf Settings" }
-    }
-    func quitConflictingOrganizer() -> Bool {
-        var accepted = true
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "local.hidebar.app") {
-            if !app.terminate() { accepted = false }
-        }
-        return accepted
-    }
-    var displaySignature: String {
-        NSScreen.screens.map {
-            let displayID = ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-            let identity = CGDisplayCreateUUIDFromDisplayID(displayID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "unknown"
-            return "\(identity):\($0.frame):\($0.visibleFrame):\($0.auxiliaryTopRightArea ?? .zero):\($0.auxiliaryTopLeftArea ?? .zero)"
-        }.sorted().joined(separator: "|")
-    }
-    func start(anchor: NSStatusItem, controller: MenuBarOrganizerController) {
-        runEpoch &+= 1
-        let epoch = runEpoch
-        self.controller = controller; self.anchor = anchor
-        layoutMessage = ""
-        guard hidingUnavailableReason == nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.runEpoch == epoch, let controller = self.controller, controller.isRunning else { return }
-                controller.refreshVisibilityRequirement(requestSettings: true)
-            }
-        }
-        createSeparateToggle()
-        let item = NSStatusBar.system.statusItem(withLength: 16)
-        item.autosaveName = "DropShelf.Organizer.Divider"
-        item.button?.title = "│"
-        item.button?.font = .systemFont(ofSize: 15, weight: .light)
-        item.button?.target = controller
-        item.button?.action = #selector(MenuBarOrganizerController.dividerAction)
-        item.button?.toolTip = "Hold Command and drag icons to the left of this divider"
-        item.button?.setAccessibilityLabel("Menu bar organizer divider")
-        divider = item
-        var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
-            guard let event, let userData else { return OSStatus(eventNotHandledErr) }
-            var keyID = EventHotKeyID()
-            guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
-                MemoryLayout<EventHotKeyID>.size, nil, &keyID) == noErr,
-                keyID.signature == 0x44534D42 else { return OSStatus(eventNotHandledErr) }
-            MainActor.assumeIsolated {
-                let runtime = Unmanaged<AppKitMenuBarOrganizerRuntime>.fromOpaque(userData).takeUnretainedValue()
-                guard let controller = runtime.controller, controller.enabled, controller.isRunning else { return }
-                if controller.recordingShortcut { controller.cancelShortcutRecording() }
-                else { controller.toggleHiddenItems() }
-            }
-            return noErr
-        }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
-    }
-    func stop() {
-        runEpoch &+= 1
-        layoutEpoch &+= 1
-        unregisterShortcut()
-        if let handler { RemoveEventHandler(handler) }; handler = nil
-        if let divider { NSStatusBar.system.removeStatusItem(divider) }; divider = nil
-        if let separateToggle { NSStatusBar.system.removeStatusItem(separateToggle) }; separateToggle = nil
-        controller = nil; anchor = nil; layoutMessage = ""
-    }
-    @discardableResult func apply(hidden: Bool, separateToggle: Bool) -> Bool {
-        layoutEpoch &+= 1
-        let epoch = layoutEpoch
-        guard hidingUnavailableReason == nil else { return false }
-        if let item = self.separateToggle {
-            let length: CGFloat = separateToggle ? 24 : 0
-            if item.length != length { item.length = length }
-            if item.isVisible != separateToggle { item.isVisible = separateToggle }
-        }
-        var hidden = hidden
-        if hidden && conflictingOrganizerRunning {
-            hidden = false
-            layoutMessage = "Hidebar is running. Use one organizer at a time."
-        } else if hidden && !canHide(requiresToggle: separateToggle) {
-            hidden = false
-            layoutMessage = "Keep DropShelf and the optional toggle to the right of the divider. Hold Command to rearrange them."
-        } else if hidden { layoutMessage = "" }
-        let lengths = spacerLengths()
-        if hidden && lengths.isEmpty {
-            hidden = false
-            layoutMessage = "Menu bar space is unavailable for this display setup. Your icons remain visible."
-        }
-        divider?.length = hidden ? lengths[0] : 16
-        divider?.button?.title = hidden ? "" : "│"
-        let image = NSImage(systemSymbolName: hidden ? "chevron.left" : "chevron.right", accessibilityDescription: hidden ? "Reveal menu bar icons" : "Hide menu bar icons")
-        image?.isTemplate = true
-        self.separateToggle?.button?.image = image
-        self.separateToggle?.button?.toolTip = hidden ? "Reveal menu bar icons" : "Hide menu bar icons"
-        if hidden {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, self.layoutEpoch == epoch,
-                          let controller = self.controller, controller.isRunning, controller.hidden else { return }
-                    let ready = self.recoveryIsReachable(requiresToggle: separateToggle)
-                    if self.conflictingOrganizerRunning || !ready {
-                        self.layoutMessage = "Icons were revealed to keep DropShelf reachable. Move the divider to the left of DropShelf."
-                        controller.rejectVisibilityTrial()
-                    }
-                }
-            }
-        }
-        return hidden
-    }
-    private func spacerLengths() -> [Double] {
-        MenuBarSpacerLayout.lengths(displays: NSScreen.screens.map {
-            MenuBarDisplayWidth(width: Double($0.frame.width),
-                usableRightWidth: $0.auxiliaryTopRightArea.map { Double($0.width) })
-        }, modern: modern)
-    }
-    private func screenRect(_ item: NSStatusItem?) -> CGRect? {
-        guard let button = item?.button, let window = button.window, item?.isVisible == true else { return nil }
-        return window.convertToScreen(button.convert(button.bounds, to: nil))
-    }
-    private func recoveryScreen() -> NSScreen? {
-        guard let rect = screenRect(anchor) else { return nil }
-        return NSScreen.screens.first { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) }
-    }
-    private func canHide(requiresToggle: Bool) -> Bool {
-        guard let screen = recoveryScreen() else { return false }
-        return MenuBarOrganizerGeometry.canHide(anchor: screenRect(anchor), divider: screenRect(divider),
-            toggle: screenRect(separateToggle), screen: screen.frame, requiresToggle: requiresToggle)
-    }
-    private func recoveryIsReachable(requiresToggle: Bool) -> Bool {
-        guard let screen = recoveryScreen() else { return false }
-        let usable = screen.auxiliaryTopRightArea ?? screen.frame
-        let anchorRect = screenRect(anchor)
-        guard MenuBarOrganizerGeometry.isReachable(anchorRect, in: screen.frame), let anchorRect,
-              anchorRect.minX >= usable.minX - 1 else { return false }
-        if requiresToggle {
-            guard let toggle = screenRect(separateToggle),
-                  MenuBarOrganizerGeometry.isReachable(toggle, in: screen.frame),
-                  toggle.minX >= usable.minX - 1, abs(toggle.midY - anchorRect.midY) <= 4 else { return false }
-        }
-        return true
-    }
-    private func createSeparateToggle() {
-        let visible = controller?.showSeparateToggle == true
-        let item = NSStatusBar.system.statusItem(withLength: visible ? 24 : 0)
-        item.autosaveName = "DropShelf.Organizer.Toggle"
-        item.isVisible = visible
-        item.button?.target = controller
-        item.button?.action = #selector(MenuBarOrganizerController.separateToggleAction)
-        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        separateToggle = item
-    }
-    func registerShortcut(_ shortcut: MenuBarShortcut) -> Bool {
-        guard hidingUnavailableReason == nil, handler != nil, !conflictingOrganizerRunning else { return false }
-        var replacement: EventHotKeyRef?
-        let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers,
-            EventHotKeyID(signature: signature, id: 1), GetEventDispatcherTarget(),
-            OptionBits(kEventHotKeyExclusive), &replacement)
-        guard status == noErr, let replacement else { return false }
-        if let hotKey { UnregisterEventHotKey(hotKey) }
-        hotKey = replacement
-        return true
-    }
-    func unregisterShortcut() {
-        if let hotKey { UnregisterEventHotKey(hotKey) }; hotKey = nil
-    }
-    func allowsHiding() -> Bool {
-        let point = NSEvent.mouseLocation
-        let nearMenu = NSScreen.screens.contains { $0.frame.contains(point) && point.y > $0.frame.maxY - 80 }
-        return !nearMenu && NSEvent.pressedMouseButtons == 0
+        else { toggleFromMenuBarControl() }
     }
 }

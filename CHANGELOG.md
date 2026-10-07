@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.2
+
+- Restore the native divider and single-arrow organizer on macOS 27 using one bounded divider with fresh saved control positions.
+- Verify the arrow through the system menu bar before and after hiding, and restore icons if the arrow becomes unreachable. Verification requires explicit Accessibility permission.
+- Use a ten-second setup trial and require the actual arrow to reveal icons before confirming the layout. Recheck setup after OS, display, or Command-drag arrangement changes.
+- Cancel stale hiding requests during rapid clicks, settings changes, permission changes, and shutdown. Preserve the chosen auto-hide delay and the existing macOS 13 through 26 organizer.
+
 ## 1.6.1
 
 - Keep menu bar icons visible on macOS 27 and later, where the previous hiding layout could also hide DropShelf's reveal arrow. Organizer hiding is unavailable on these versions pending a compatible implementation.

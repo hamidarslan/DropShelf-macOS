@@ -10,12 +10,16 @@ trap 'rm -rf "$WORK"' EXIT
 xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules -o "$WORK/regression" \
     "$ROOT/Sources/Models/MenuBarOrganizerState.swift" \
     "$ROOT/Sources/Services/MenuBarOrganizerController.swift" \
+    "$ROOT/Sources/Services/MenuBarControlMonitor.swift" \
+    "$ROOT/Sources/Services/AppKitMenuBarOrganizerRuntime.swift" \
     "$ROOT/Tests/MenuBarOrganizer/main.swift" -framework Cocoa -framework Carbon
 "$WORK/regression"
 
 xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules -o "$WORK/recorder" \
     "$ROOT/Sources/Models/MenuBarOrganizerState.swift" \
     "$ROOT/Sources/Services/MenuBarOrganizerController.swift" \
+    "$ROOT/Sources/Services/MenuBarControlMonitor.swift" \
+    "$ROOT/Sources/Services/AppKitMenuBarOrganizerRuntime.swift" \
     "$ROOT/Sources/UI/MenuBarShortcutRecorder.swift" \
     "$ROOT/Tests/MenuBarRecorder/main.swift" -framework Cocoa -framework Carbon -framework SwiftUI
 "$WORK/recorder"

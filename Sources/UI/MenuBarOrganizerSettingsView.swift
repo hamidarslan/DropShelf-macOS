@@ -16,7 +16,7 @@ struct MenuBarOrganizerSettingsView: View {
                 }
 
                 card {
-                    switchRow("Manage menu bar icons", detail: !organizer.hidingAvailable ? "Preference saved. Hiding is unavailable on this macOS version." : organizer.enabled ? "Starts with DropShelf whenever enabled." : "Off stays off each time DropShelf starts.", binding: Binding(
+                    switchRow("Manage menu bar icons", detail: !organizer.hidingAvailable ? (organizer.requiresAccessibilityVerification ? "Preference saved. Enable verification before hiding icons." : "Preference saved. Hiding is unavailable on this macOS version.") : organizer.enabled ? "Starts with DropShelf whenever enabled." : "Off stays off each time DropShelf starts.", binding: Binding(
                         get: { organizer.enabled }, set: { organizer.setEnabled($0) }
                     ), status: organizer.enabled ? "On" : "Off")
                 }
@@ -37,12 +37,21 @@ struct MenuBarOrganizerSettingsView: View {
                 }
 
                 if let reason = organizer.hidingUnavailableReason {
-                    Label(reason, systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundColor(palette.warm)
-                        .padding(14)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(palette.warm.opacity(0.08)))
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(reason, systemImage: "checkmark.shield")
+                            .font(.system(size: 12))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if organizer.requiresAccessibilityVerification {
+                            Text("macOS grants broad Accessibility access. DropShelf reads the menu bar layout to locate and verify its own arrow and divider. It does not record the screen or upload this information.")
+                                .font(.system(size: 11))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Enable menu bar verification…") { organizer.requestAccessibilityVerification() }
+                                .controlSize(.small)
+                        }
+                    }
+                    .foregroundColor(palette.warm)
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(palette.warm.opacity(0.08)))
                 }
 
                 if organizer.enabled && organizer.hidingAvailable && (!organizer.hasCompletedSetup || organizer.isArranging || organizer.requiresVisibilityConfirmation) {
@@ -106,7 +115,16 @@ struct MenuBarOrganizerSettingsView: View {
                                 .accessibilityLabel("Shortcut status: \(organizer.shortcutMessage)")
                         }
                         rule
-                        switchRow("Separate reveal button", detail: "Adds a small chevron beside DropShelf.", binding: $organizer.showSeparateToggle)
+                        if organizer.requiresDedicatedArrow {
+                            HStack {
+                                Label("Menu bar arrow", systemImage: "chevron.left.chevron.right")
+                                Spacer()
+                                Text("Always available").foregroundColor(palette.muted)
+                            }
+                            .font(.system(size: 12)).padding(.vertical, 12)
+                        } else {
+                            switchRow("Separate reveal button", detail: "Adds a small chevron beside DropShelf.", binding: $organizer.showSeparateToggle)
+                        }
                     }
                 }
                 .disabled(!organizer.enabled || !organizer.hidingAvailable)
@@ -125,7 +143,7 @@ struct MenuBarOrganizerSettingsView: View {
                     Text(!organizer.hidingAvailable ? "Your organizer preferences are saved. DropShelf's file and clipboard tools remain available." : organizer.enabled ? "Option-click DropShelf to show or hide icons. Its regular click still opens the shelf." : "Turn on to arrange your menu bar. Your choice and settings are remembered across launches.")
                         .font(.system(size: 11))
                         .fixedSize(horizontal: false, vertical: true)
-                    Label("Works locally. No additional permissions.", systemImage: "lock.shield")
+                    Label(organizer.requiresAccessibilityVerification ? "Local verification. No screen recording or uploads." : "Works locally. No additional permissions.", systemImage: "lock.shield")
                         .font(.system(size: 10))
                 }
                 .foregroundColor(palette.muted)
@@ -202,8 +220,11 @@ struct MenuBarOrganizerSettingsView: View {
             }
             guideStep(1, "Hold Command (⌘) and drag less-used icons to the left of the divider in your real menu bar.")
             guideStep(2, organizer.showSeparateToggle ? "Keep the arrow and the icons you use every day on the right." : "Keep DropShelf and the icons you use every day on the right.")
-            guideStep(3, "Try hiding. Check the result before showing icons again.")
+            guideStep(3, "Click the menu bar arrow to hide your chosen icons, then click it again to reveal them.")
             if organizer.requiresVisibilityConfirmation {
+                Text("The test automatically reveals icons after 10 seconds. Finish setup only after the menu bar arrow works both ways.")
+                    .font(.system(size: 11)).foregroundColor(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(organizer.showSeparateToggle ? "Check that your chosen icons disappear while the arrow stays in the menu bar. Click the arrow again to restore them. Reopen DropShelf from Applications if you need to reveal everything." : "Check that your chosen icons disappear while DropShelf stays in the menu bar. Option-click DropShelf to restore them. Reopen DropShelf from Applications if needed.")
                     .font(.system(size: 11)).foregroundColor(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -212,7 +233,7 @@ struct MenuBarOrganizerSettingsView: View {
                 Button("Try hiding") {
                     organizer.endArranging()
                     organizer.hide()
-                }
+                }.disabled(organizer.isApplying)
                 Button("Show icons") {
                     organizer.reveal()
                     organizer.beginArranging()
