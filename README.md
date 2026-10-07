@@ -39,16 +39,16 @@ DropShelf performs local file processing without an analytics client. The build 
 
 ## Menu bar organizer
 
-Open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switch is remembered: while enabled, the organizer starts whenever DropShelf runs. Turning it off removes its divider, reveal controls, timers, and shortcut while keeping your preferences for next time.
+On macOS 13 through 26, open **Preferences > Menu Bar** and turn on **Manage menu bar icons**. The switch is remembered: while enabled, the organizer starts whenever DropShelf runs. Turning it off removes its divider, reveal controls, timers, and shortcut while keeping your preferences for next time.
 
 The setup guide reveals your icons while you arrange them. Hold Command and drag less-used icons to the left of the divider; keep DropShelf and essential icons on its right. Complete setup to resume automatic hiding. The organizer changes space in the actual macOS menu bar; it does not copy other apps' icons into the shelf.
 
-On macOS 27, setup asks you to check that your chosen icons hide while the menu bar control stays visible, then use that control to restore them. Changing displays or the separate reveal button can require this check again; the organizer remains enabled while waiting.
+**On macOS 27 and later, organizer hiding is unavailable.** The changed system layout can push the reveal arrow into overflow along with other icons. DropShelf keeps icons visible, preserves your organizer preferences, and leaves its file and clipboard tools available. The organizer sequence in the demonstration applies to macOS 13 through 26.
 
 - Click DropShelf normally to toggle the shelf. Option-click toggles hidden menu bar icons while the organizer is enabled.
 - Right-click for organizer controls, pauses, and settings. A separate reveal button is optional.
 - The organizer shortcut defaults to **Control + Option + H** and can be changed or disabled. The shelf keeps **Command + Shift + Y**.
-- Choose an auto-hide delay of 5, 10, 15, 30, or 60 seconds. Hiding waits while you use the menu bar, hold a mouse button, or arrange icons.
+- Choose an auto-hide delay of 5, 10, 15, 30, or 60 seconds. Hiding waits while you use the menu bar, hold a mouse button, arrange icons, or keep Menu Bar settings open.
 - Keep icons visible for 5 minutes, 1 hour, or until resumed. A temporary reveal or pause does not turn the organizer off.
 - Reopen DropShelf from Applications to reveal icons and recover the organizer settings. Quitting removes its status items without forgetting the enabled setting.
 

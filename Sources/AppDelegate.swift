@@ -255,7 +255,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         organizerObservation = MenuBarOrganizerController.shared.$enabled
             .receive(on: RunLoop.main)
             .sink { [weak self] enabled in
-                self?.statusItem.button?.toolTip = enabled
+                self?.statusItem.button?.toolTip = enabled && MenuBarOrganizerController.shared.hidingAvailable
                     ? "DropShelf · Click for shelf · Option-click for menu bar icons · Right-click for controls"
                     : "DropShelf · Click for shelf · Right-click for controls"
             }

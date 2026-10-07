@@ -17,7 +17,7 @@ struct MenuBarShortcutRecorder: NSViewRepresentable {
 
     func updateNSView(_ button: RecorderButton, context: Context) {
         button.title = organizer.recordingShortcut ? "Press keys…" : organizer.shortcutEnabled ? organizer.shortcut.display : "Record shortcut…"
-        button.isEnabled = organizer.enabled
+        button.isEnabled = organizer.enabled && organizer.hidingAvailable
         button.toolTip = organizer.recordingShortcut ? "Escape cancels recording" : "Click to change the menu bar shortcut"
         button.setAccessibilityValue(organizer.recordingShortcut ? "Recording" : organizer.shortcutEnabled ? organizer.shortcut.display : "Off")
     }

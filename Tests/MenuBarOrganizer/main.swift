@@ -16,6 +16,7 @@ func check(_ condition: Bool, _ label: String) {
     var acceptLayout = true
     var displaySignature = "first"
     var conflictMessage = ""
+    var hidingUnavailableReason: String?
     var requiresVisibilityConfirmation = false
     var allowsVisibilityTrial = true
     var platformSignature = "27.0"
@@ -97,6 +98,25 @@ check(controller.hasCompletedSetup && !controller.isArranging && !controller.hid
       "completing setup persists and releases arrangement")
 check(defaults.bool(forKey: "organizer.hasCompletedSetup"), "setup completion survives relaunch")
 check(scheduler.entries.last?.seconds == 30, "automatic hiding follows the chosen delay")
+let automaticBeforeSettings = scheduler.entries.last!.action
+controller.setSettingsOpen(true)
+check(controller.settingsOpen && !controller.hidden,
+      "opening menu bar settings reveals icons and holds automatic hiding")
+automaticBeforeSettings()
+check(!controller.hidden,
+      "automatic timer queued before settings opened stays inert while settings are open")
+controller.hide()
+check(controller.hidden,
+      "explicit settings trial can still hide icons while automatic hiding is held")
+controller.reveal()
+let schedulesBeforeLeavingSettings = scheduler.entries.count
+controller.setSettingsOpen(false)
+check(!controller.settingsOpen && scheduler.entries.count == schedulesBeforeLeavingSettings + 1 &&
+      scheduler.entries.last?.seconds == 30,
+      "leaving menu bar settings resumes the configured automatic delay")
+scheduler.fireLast()
+check(controller.hidden, "resumed automatic timer hides after leaving menu bar settings")
+controller.reveal()
 controller.setMenuOpen(true)
 scheduler.fireLast()
 check(!controller.hidden, "an open menu holds icons visible")
@@ -139,8 +159,10 @@ check(!controller.hidden && !controller.isArranging,
 controller.endArranging()
 controller.reveal()
 let stale = scheduler.entries.last!.action
+controller.setSettingsOpen(true)
 controller.shutdown()
-check(controller.enabled && !controller.isRunning && !controller.hidden, "shutdown clears resources and retains enabled preference")
+check(controller.enabled && !controller.isRunning && !controller.hidden && !controller.settingsOpen,
+      "shutdown clears settings hold and resources while retaining enabled preference")
 controller.shutdown()
 check(runtime.stops == 1, "shutdown is idempotent")
 stale()
@@ -184,6 +206,25 @@ controller.pauseHiding(seconds: nil)
 controller.beginArranging()
 check(!controller.hidden && !controller.isPaused && !controller.isArranging,
       "disabled organizer ignores all layout and pause actions")
+runtime.hidingUnavailableReason = "Unsupported menu bar layout"
+let timersBeforeUnsupported = scheduler.entries.count
+let layoutsBeforeUnsupported = runtime.layouts.count
+controller.setEnabled(true)
+controller.hide()
+controller.completeSetup()
+check(!controller.hidingAvailable && !controller.hidden && !controller.isArranging,
+      "unsupported runtime never enters hidden or arrangement state")
+check(scheduler.entries.count == timersBeforeUnsupported &&
+      runtime.layouts.dropFirst(layoutsBeforeUnsupported).allSatisfy { !$0 },
+      "unsupported runtime never schedules or applies a hidden layout")
+check(controller.statusMessage == "Unsupported menu bar layout" && !controller.shortcutAvailable,
+      "unsupported runtime explains unavailable hiding without registering a dead shortcut")
+check(controller.makeContextMenuItems().count == 2,
+      "unsupported runtime offers settings without misleading hide controls")
+controller.toggleHiddenItems()
+check(!controller.hidden, "menu bar toggle cannot hide icons on an unsupported runtime")
+controller.setEnabled(false)
+runtime.hidingUnavailableReason = nil
 let disabledMenu = controller.makeContextMenuItems()
 check(disabledMenu.count == 2 && disabledMenu.allSatisfy { !$0.isSeparatorItem && $0.target === controller },
       "disabled context menu owns only enable and settings actions")
@@ -215,37 +256,12 @@ for candidate in [MenuBarShortcut(keyCode: 53, modifiers: MenuBarShortcut.contro
     check(!candidate.isValid, "invalid focused shortcut is rejected")
 }
 check(MenuBarShortcut.standard.display == "⌃⌥H", "shortcut display reflects Carbon modifiers")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5)], modern: true) == [507, 507],
-      "actual notched display uses two segments below its reported discard cliff")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1512, usableRightWidth: 663.5)], modern: true) == [433, 433],
-      "smaller notched display preserves both cliff margin and status-area coverage")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 2056)], modern: true) == [964, 964, 964],
-      "non-notched display uses half-width cliff and enough bounded segments")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 3480)], modern: true) == [1676, 1676, 1676],
-      "wide non-notched display receives complete coverage")
-let mixedDisplays = [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 7680)]
-let mixedLengths = MenuBarSpacerLayout.lengths(displays: mixedDisplays, modern: true)
-check(mixedLengths == Array(repeating: 507, count: 16),
-      "notched and 8K display pair uses sixteen complete bounded segments")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 3840)], modern: true) == Array(repeating: 507, count: 8),
-      "mixed display calculation keeps right-area widths paired to the correct full display")
-for invalid in [MenuBarDisplayWidth(width: .nan), MenuBarDisplayWidth(width: .infinity),
-                MenuBarDisplayWidth(width: 0), MenuBarDisplayWidth(width: -1),
-                MenuBarDisplayWidth(width: 1710, usableRightWidth: 0),
-                MenuBarDisplayWidth(width: 1710, usableRightWidth: 1800),
-                MenuBarDisplayWidth(width: 1710, usableRightWidth: .nan),
-                MenuBarDisplayWidth(width: 1710, usableRightWidth: .infinity)] {
-    check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), invalid], modern: true).isEmpty,
-          "invalid paired display refuses the complete modern layout")
+for displays in [[], [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5)],
+                 [MenuBarDisplayWidth(width: 2056)],
+                 [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 7680)]] {
+    check(MenuBarSpacerLayout.lengths(displays: displays, modern: true).isEmpty,
+          "modern menu bar never allocates displacement spacers")
 }
-check(MenuBarSpacerLayout.lengths(displays: [], modern: true).isEmpty,
-      "modern geometry never invents an absent screen")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 200, usableRightWidth: 100)], modern: true).isEmpty,
-      "a unit below forty points refuses hiding instead of crossing the discard cliff")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 208)], modern: true) == Array(repeating: 40, count: 6),
-      "minimum safe forty-point unit covers the status area completely")
-check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 1710, usableRightWidth: 762.5), MenuBarDisplayWidth(width: 8192)], modern: true).isEmpty,
-      "coverage beyond sixteen items refuses instead of silently truncating")
 check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: .nan), MenuBarDisplayWidth(width: -1)], modern: false) == [2880],
       "legacy geometry preserves a bounded safe fallback")
 check(MenuBarSpacerLayout.lengths(displays: [MenuBarDisplayWidth(width: 6000)], modern: false) == [10000],
@@ -308,15 +324,6 @@ check(!MenuBarOrganizerGeometry.canHide(anchor: CGRect(x: 1300, y: -20, width: 2
 check(!MenuBarOrganizerGeometry.isReachable(CGRect(x: -50, y: 875, width: 24, height: 25), in: screen),
       "offscreen recovery rectangle fails the legacy reachability check")
 let measuredScreen = CGRect(x: 0, y: 0, width: 1710, height: 1107)
-let knownIDs = [Int(1) << 32, Int(9) << 32, Int(2) << 32]
-check(MenuBarOrganizerGeometry.hasSyntheticHosts(majorVersion: 27, windowIDs: knownIDs, distinctItems: true),
-      "exact macOS27 distinct synthetic hosts require manual verification")
-for (major, ids, distinct) in [(26, knownIDs, true), (28, knownIDs, true),
-                              (27, [1, 9, 2], true), (27, [knownIDs[0],knownIDs[0]], true),
-                              (27, knownIDs, false)] {
-    check(!MenuBarOrganizerGeometry.hasSyntheticHosts(majorVersion: major, windowIDs: ids, distinctItems: distinct),
-          "other OS real-window duplicate and non-distinct hosts retain strict geometry")
-}
 let legacyAnchorButton = CGRect(x: 954, y: 1079, width: 34, height: 22)
 let legacyDividerButton = CGRect(x: 1070, y: 1079, width: 16, height: 22)
 let legacyToggleButton = CGRect(x: 956, y: 1077, width: 24, height: 27)
@@ -465,6 +472,14 @@ startupRuntime.conflictingOrganizerRunning = false
 startupController.refreshConflictingOrganizerState()
 check(startupScheduler.entries.last?.seconds == 15 && !startupController.hidden,
       "pending startup hide receives a fresh safety grace after conflict exit")
+let staleStartup = startupScheduler.entries.last!.action
+startupController.setSettingsOpen(true)
+staleStartup()
+check(!startupController.hidden && startupController.settingsOpen,
+      "opening recovery settings prevents a queued startup hide")
+startupController.setSettingsOpen(false)
+check(!startupController.hidden,
+      "closing recovery leaves icons visible when automatic hiding is disabled")
 startupController.shutdown()
 print("PASS: menu bar organizer regression suite")
 

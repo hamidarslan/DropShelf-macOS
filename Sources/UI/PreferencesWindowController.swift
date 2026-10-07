@@ -11,6 +11,7 @@ import SwiftUI
     }
 
     public func showMenuBar() {
+        MenuBarOrganizerController.shared.setSettingsOpen(true)
         present(section: .menuBar)
     }
 
@@ -43,6 +44,7 @@ import SwiftUI
 
     public func windowWillClose(_ notification: Notification) {
         MenuBarOrganizerController.shared.endArranging()
+        MenuBarOrganizerController.shared.setSettingsOpen(false)
         MenuBarOrganizerController.shared.cancelShortcutRecording()
         window = nil
     }
