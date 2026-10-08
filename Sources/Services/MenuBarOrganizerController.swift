@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import OSLog
 import Carbon
 import Combine
 
@@ -47,6 +48,7 @@ extension MenuBarOrganizerRuntime {
 @MainActor
 final class MenuBarOrganizerController: NSObject, ObservableObject {
     static let shared = MenuBarOrganizerController(defaults: .standard)
+    private let logger = Logger(subsystem: "com.dropshelf.macos", category: "MenuBar")
     var hidingUnavailableReason: String? { runtime.hidingUnavailableReason }
     var hidingAvailable: Bool { hidingUnavailableReason == nil }
     var requiresAccessibilityVerification: Bool { runtime.requiresAccessibilityVerification }
@@ -215,6 +217,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     }
     private func reveal(confirmingVisibilityTrial: Bool) {
         guard enabled && isRunning else { return }
+        logger.info("Reveal requested; settingsOpen=\(self.settingsOpen, privacy: .public), arranging=\(self.isArranging, privacy: .public), confirming=\(confirmingVisibilityTrial, privacy: .public)")
         startupDeadline = nil; cancelHide()
         applyLayout(hidden: false, resumeAutoHideWhenVisible: true,
                     confirmsVisibilityTrial: confirmingVisibilityTrial)
@@ -253,9 +256,11 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         isArranging = false; cancelShortcutRecording(); updateStatus(); scheduleAutoHide()
     }
     func setSettingsOpen(_ value: Bool) {
+        if settingsOpen != value { logger.info("Menu bar settings open=\(value, privacy: .public)") }
         if value {
-            settingsOpen = true
             startupDeadline = nil
+            guard !settingsOpen else { cancelHide(); return }
+            settingsOpen = true
             if enabled && isRunning { reveal() }
             else { cancelHide() }
         } else {
@@ -443,6 +448,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         activeVisibilityScope = scope
         requiresVisibilityConfirmation = pending
         if invalidated {
+            logger.info("Menu bar layout confirmation invalidated")
             hasVisibilityTrial = false; hasCompletedSetup = false
             defaults.set(false, forKey: "organizer.hasCompletedSetup")
             startupDeadline = nil; cancelHide()

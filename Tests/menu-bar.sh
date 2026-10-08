@@ -7,7 +7,13 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d /tmp/dropshelf-menu-bar.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
+xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules -o "$WORK/guard-policy" \
+    "$ROOT/Sources/Models/MenuBarGuardPolicy.swift" \
+    "$ROOT/Tests/MenuBarGuard/main.swift"
+"$WORK/guard-policy"
+
 xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules -o "$WORK/regression" \
+    "$ROOT/Sources/Models/MenuBarGuardPolicy.swift" \
     "$ROOT/Sources/Models/MenuBarOrganizerState.swift" \
     "$ROOT/Sources/Services/MenuBarOrganizerController.swift" \
     "$ROOT/Sources/Services/MenuBarControlMonitor.swift" \
@@ -16,6 +22,7 @@ xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path 
 "$WORK/regression"
 
 xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path /tmp/dropshelf-swift-modules -o "$WORK/recorder" \
+    "$ROOT/Sources/Models/MenuBarGuardPolicy.swift" \
     "$ROOT/Sources/Models/MenuBarOrganizerState.swift" \
     "$ROOT/Sources/Services/MenuBarOrganizerController.swift" \
     "$ROOT/Sources/Services/MenuBarControlMonitor.swift" \
@@ -23,3 +30,5 @@ xcrun swiftc -target arm64-apple-macosx13.0 -sdk "$SDK_PATH" -module-cache-path 
     "$ROOT/Sources/UI/MenuBarShortcutRecorder.swift" \
     "$ROOT/Tests/MenuBarRecorder/main.swift" -framework Cocoa -framework Carbon -framework SwiftUI
 "$WORK/recorder"
+
+bash "$ROOT/Tests/menu-bar-control.sh"
