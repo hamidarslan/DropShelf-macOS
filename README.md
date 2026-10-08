@@ -5,7 +5,7 @@
 <h1 align="center">DropShelf</h1>
 
 <p align="center">
-  A native macOS shelf for files, clipboard, media tools, and an optional menu bar organizer.
+  A native macOS shelf for files, clipboard, media tools, menu bar organization, and optional Auto Quit.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ## See it in action
 
-Start dragging a file and DropShelf appears. Keep files, clipboard, image/PDF tools, and menu bar controls together in one app.
+Start dragging a file and DropShelf appears. Keep files, clipboard, image/PDF tools, menu bar controls, and optional last-window app quitting together in one app.
 
 ![DropShelf overview showing instant file dragging, clipboard, media tools, and menu bar organization](docs/media/dropshelf-drag-demo.gif)
 
@@ -55,6 +55,16 @@ The optional **Try hiding** button in Settings runs a ten-second test. Ordinary 
 - Reopen DropShelf from Applications to reveal icons and recover the organizer settings. Quitting removes its status items without forgetting the enabled setting.
 
 The organizer uses DropShelf's existing login setting and runs locally. Menu-bar space, system-owned icons, and notched or multiple displays remain subject to macOS layout rules. Use one menu bar organizer at a time and choose a free shortcut. Ad-hoc signed app updates may require renewing Accessibility access in System Settings.
+
+## Auto Quit
+
+Open **Preferences > Auto Quit**, select apps in **Keep running**, then enable **Quit apps after the last window closes**. Auto Quit is off by default. Selected apps remain running; other supported desktop apps receive a normal quit request about one second after their last observed window closes. The menu also offers Auto Quit controls.
+
+Minimizing or hiding windows does not trigger quitting. Remaining windows, save dialogs, uncertain window reads, unsupported close notifications, and missing Accessibility permission prevent a quit request. Launching an app with no windows does not count as closing one. Finder, DropShelf, system services, and background-only agents are protected. A canceled or refused quit is not repeatedly requested for the same close event.
+
+Auto Quit uses Accessibility permission on supported macOS versions to observe window state locally. It does not read window titles or document contents, record the screen, or upload app activity. Normal quitting allows apps to ask to save or cancel, but can stop background audio, calls, downloads, or work if the app allows it. Keep those apps in your exception list. Apps with unusual window lifecycles may stay open when closure cannot be verified.
+
+Quitting removes the running indicator and running-only Dock entry. Pinned shortcuts and the Dock's recent-app area can still show an icon. Auto Quit does not alter Dock preferences or unpin apps. Turning the module off immediately cancels pending requests and removes its observers while keeping your exceptions.
 
 ## Clipboard history
 

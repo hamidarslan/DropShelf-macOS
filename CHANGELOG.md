@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+
+- Add optional Auto Quit: supported desktop apps receive a normal quit request after their last observed window closes.
+- Add a searchable Keep running exception list, persistent on/off switch, and menu controls. Auto Quit is off by default.
+- Preserve remaining, minimized, and hidden windows. Leave apps running when window state or close notifications cannot be verified.
+- Cancel pending requests after setting changes, process exit, permission loss, or sleep. Allow normal save prompts and app cancellation without repeating the same quit request.
+- Keep Finder, DropShelf, system services, Dock shortcuts, and Dock preferences protected.
+
 ## 1.6.4
 
 - Restrict the ten-second auto-restore timer to the explicit Settings test. Ordinary menu-bar arrow clicks never start a timed trial.

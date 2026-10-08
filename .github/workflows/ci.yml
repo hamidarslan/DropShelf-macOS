@@ -24,6 +24,8 @@ jobs:
         run: bash Tests/run.sh
       - name: Menu bar lifecycle and persistence tests
         run: bash Tests/menu-bar.sh
+      - name: Auto Quit policy and lifecycle tests
+        run: bash Tests/auto-quit.sh
       - name: Clipboard precision and privacy tests
         run: bash Tests/clipboard.sh
       - name: Image correctness tests
