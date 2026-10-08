@@ -159,7 +159,7 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         inspection = monitor.inspect(expected: controlIDs, mode: .expanded) { [weak self] result in
             guard let self, self.layoutEpoch == epoch, self.controller?.isRunning == true else { return }
             self.inspection = nil
-            guard result.reliable, let region = result.menuBarFrame,
+            guard result.placementVerified, let region = result.menuBarFrame,
                   let width = MenuBarNativeLayout.width(usableWidth: region.width) else {
                 self.logInspection(result, context: "before-hide")
                 let moved = result.reachability == .unreachable
@@ -187,7 +187,7 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
             guard let self, self.layoutEpoch == epoch else { return }
             self.inspection = nil
             if !NSMenu.menuBarVisible() { self.verifyCollapsed(epoch: epoch); return }
-            guard result.reachability == .reachable || result.reachability == .temporarilyObscured else {
+            guard result.placementVerified else {
                 self.logInspection(result, context: "after-hide")
                 self.finishNativeFailure("Icons were restored because their control could not be verified. Click the arrow to retry.",
                     invalidateSetup: result.reachability == .unreachable)

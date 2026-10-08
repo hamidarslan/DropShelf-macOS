@@ -94,5 +94,24 @@ let missingExpandedDivider = MenuBarControlClassificationEvidence(
 check(MenuBarControlClassifier.classify(missingExpandedDivider, mode: .expanded), .unreachable,
       "expanded preflight requires the divider")
 
+func placementPermitsHide(_ evidence: MenuBarControlClassificationEvidence) -> Bool {
+    let reachability = MenuBarControlClassifier.classify(evidence, mode: .expanded)
+    let result = MenuBarControlInspectionResult(requestID: 1, arrowFrame: .zero, dividerFrame: .zero,
+        menuBarFrame: .zero, reachability: reachability, reason: .verified,
+        diagnostic: MenuBarControlInspectionDiagnostic(stage: .systemHitTest, axError: nil,
+            elapsedMilliseconds: 1, hitProcessID: nil, overlay: nil))
+    return result.placementVerified
+}
+if !placementPermitsHide(foreignWindow) || !placementPermitsHide(applicationHelpTag) {
+    failures += 1
+    fputs("FAIL: a verified arrow placement can hide while an unrelated overlay is present\n", stderr)
+}
+for evidence in [partial, missing, displaced, ambiguous, denied, systemDivider, unknownSystemControl, missingExpandedDivider] {
+    if placementPermitsHide(evidence) {
+        failures += 1
+        fputs("FAIL: uncertain or displaced controls must not permit hiding\n", stderr)
+    }
+}
+
 if failures > 0 { exit(1) }
 print("MenuBarControlMonitor classification tests passed")

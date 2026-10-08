@@ -141,6 +141,7 @@ struct MenuBarControlInspectionResult: Equatable, Sendable {
     let diagnostic: MenuBarControlInspectionDiagnostic
 
     var reliable: Bool { reachability == .reachable }
+    var placementVerified: Bool { reachability == .reachable || reachability == .temporarilyObscured }
 }
 
 struct MenuBarControlInspectionRequest: Equatable, Sendable {
