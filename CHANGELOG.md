@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.3
+
+- Keep the menu bar collapsed through temporary Accessibility read failures, tooltips, and covering menus. Require repeated evidence before treating the arrow as lost.
+- Preserve the confirmed arrangement when verification is temporarily unavailable, and pause automatic hiding instead of repeatedly resetting setup.
+- Avoid redundant native control updates and duplicate Settings-open reveals.
+- Add guard-policy and Accessibility evidence regression checks, plus local reason-code diagnostics for unexpected recovery.
+
 ## 1.6.2
 
 - Restore the native divider and single-arrow organizer on macOS 27 using one bounded divider with fresh saved control positions.

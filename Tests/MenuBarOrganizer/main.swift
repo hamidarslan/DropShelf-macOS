@@ -129,6 +129,11 @@ check(!controller.hidden,
 controller.hide()
 check(controller.hidden,
       "explicit settings trial can still hide icons while automatic hiding is held")
+let layoutsBeforeDuplicateSettings = runtime.layouts.count
+controller.setSettingsOpen(true)
+check(controller.hidden && runtime.layouts.count == layoutsBeforeDuplicateSettings,
+      "duplicate settings-open notifications do not undo a manual hide")
+
 controller.reveal()
 let schedulesBeforeLeavingSettings = scheduler.entries.count
 controller.setSettingsOpen(false)

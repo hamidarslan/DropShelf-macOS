@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import OSLog
 
 @MainActor
 final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
@@ -20,6 +21,9 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
     private var guardTimer: Timer?
     private var requestTimeout: DispatchWorkItem?
     private var arrangementMonitor: Any?
+    private var guardPolicy = MenuBarGuardPolicy()
+    private var lastGuardDiagnostic: String?
+    private let logger = Logger(subsystem: "com.dropshelf.macos", category: "MenuBar")
     var requiresAccessibilityVerification: Bool { modern }
     var requiresDedicatedArrow: Bool { modern }
     private var modern: Bool { ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 }
@@ -114,6 +118,7 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         runEpoch &+= 1
         layoutEpoch &+= 1
         cancelPending()
+        guardPolicy.reset(); lastGuardDiagnostic = nil
         guardTimer?.invalidate(); guardTimer = nil
         if let arrangementMonitor { NSEvent.removeMonitor(arrangementMonitor) }; arrangementMonitor = nil
         unregisterShortcut()
@@ -126,10 +131,11 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         layoutEpoch &+= 1
         let epoch = layoutEpoch
         cancelPending()
+        guardPolicy.reset(); lastGuardDiagnostic = nil
         guardTimer?.invalidate(); guardTimer = nil
         guard modern else { completion(applyLegacy(hidden: hidden, separateToggle: separateToggle)); return }
-        self.separateToggle?.isVisible = true
-        self.separateToggle?.length = 24
+        if self.separateToggle?.isVisible == false { self.separateToggle?.isVisible = true }
+        if self.separateToggle?.length != 24 { self.separateToggle?.length = 24 }
         guard hidden else {
             revealNative()
             completion(false)
@@ -146,16 +152,20 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
         pendingCompletion = completion
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, self.layoutEpoch == epoch else { return }
-            self.finishNativeFailure("The menu bar check timed out. Your icons remain visible.")
+            self.finishNativeFailure("The menu bar check timed out. Click the arrow to retry.", invalidateSetup: false)
         }
         requestTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: timeout)
         inspection = monitor.inspect(expected: controlIDs, mode: .expanded) { [weak self] result in
             guard let self, self.layoutEpoch == epoch, self.controller?.isRunning == true else { return }
             self.inspection = nil
-            guard result.reliable, let region = result.menuBarFrame,
+            guard result.placementVerified, let region = result.menuBarFrame,
                   let width = MenuBarNativeLayout.width(usableWidth: region.width) else {
-                self.finishNativeFailure("Keep the arrow visible to the right of the divider. Your icons remain visible.")
+                self.logInspection(result, context: "before-hide")
+                let moved = result.reachability == .unreachable
+                self.finishNativeFailure(moved
+                    ? "Keep the arrow visible to the right of the divider. Your icons remain visible."
+                    : "The menu bar check is temporarily unavailable. Click the arrow to retry.", invalidateSetup: moved)
                 return
             }
             self.divider?.button?.title = ""
@@ -177,8 +187,10 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
             guard let self, self.layoutEpoch == epoch else { return }
             self.inspection = nil
             if !NSMenu.menuBarVisible() { self.verifyCollapsed(epoch: epoch); return }
-            guard result.reliable else {
-                self.finishNativeFailure("Icons were restored because the arrow was no longer reachable.")
+            guard result.placementVerified else {
+                self.logInspection(result, context: "after-hide")
+                self.finishNativeFailure("Icons were restored because their control could not be verified. Click the arrow to retry.",
+                    invalidateSetup: result.reachability == .unreachable)
                 return
             }
             self.requestTimeout?.cancel(); self.requestTimeout = nil
@@ -206,37 +218,69 @@ final class AppKitMenuBarOrganizerRuntime: MenuBarOrganizerRuntime {
     }
 
     private func revealNative() {
-        divider?.length = 16
-        divider?.button?.title = "│"
+        if divider?.length != 16 { divider?.length = 16 }
+        if divider?.button?.title != "│" { divider?.button?.title = "│" }
         setArrow(hidden: false)
     }
 
     private func setArrow(hidden: Bool) {
         let label = hidden ? "Reveal menu bar icons" : "Hide menu bar icons"
+        guard let button = separateToggle?.button, button.toolTip != label || button.image == nil else { return }
         let image = NSImage(systemSymbolName: hidden ? "chevron.left" : "chevron.right", accessibilityDescription: label)
         image?.isTemplate = true
-        separateToggle?.button?.image = image
-        separateToggle?.button?.toolTip = label
+        button.image = image
+        button.toolTip = label
     }
 
-    private func finishNativeFailure(_ message: String) {
+    private func finishNativeFailure(_ message: String, invalidateSetup: Bool = true) {
+        logger.notice("Restoring menu bar icons; invalidateSetup=\(invalidateSetup, privacy: .public)")
         layoutMessage = message
         guardTimer?.invalidate(); guardTimer = nil
         revealNative()
         cancelPending()
-        controller?.rejectVisibilityTrial()
+        guardPolicy.reset()
+        if invalidateSetup { controller?.rejectVisibilityTrial() }
+        else { controller?.pauseHiding(seconds: nil) }
+    }
+
+    private func logInspection(_ result: MenuBarControlInspectionResult, context: String) {
+        let reason = String(describing: result.reason)
+        let reachability = String(describing: result.reachability)
+        logger.info("Menu bar check \(context, privacy: .public): \(reachability, privacy: .public), reason=\(reason, privacy: .public), stage=\(result.diagnostic.stage.rawValue, privacy: .public), error=\(result.diagnostic.axError ?? 0, privacy: .public), ms=\(result.diagnostic.elapsedMilliseconds, privacy: .public)")
     }
 
     private func startGuard(epoch: UInt64) {
+        guardPolicy.reset(); lastGuardDiagnostic = nil
         let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.layoutEpoch == epoch, self.controller?.hidden == true,
-                      self.inspection == nil, NSMenu.menuBarVisible() else { return }
+                      self.inspection == nil else { return }
+                guard NSMenu.menuBarVisible() else { self.guardPolicy.reset(); return }
                 self.inspection = self.monitor.inspect(expected: self.controlIDs, mode: .collapsed) { [weak self] result in
                     guard let self, self.layoutEpoch == epoch else { return }
                     self.inspection = nil
-                    if !result.reliable && NSMenu.menuBarVisible() {
-                        self.finishNativeFailure("Icons were restored to keep the menu bar arrow reachable.")
+                    guard NSMenu.menuBarVisible() else { self.guardPolicy.reset(); return }
+                    let diagnostic = "\(result.reachability)|\(result.reason)|\(result.diagnostic.stage.rawValue)|\(result.diagnostic.axError ?? 0)"
+                    if diagnostic != self.lastGuardDiagnostic {
+                        if result.reachability != .reachable || self.lastGuardDiagnostic != nil {
+                            self.logInspection(result, context: "while-hidden")
+                        }
+                        self.lastGuardDiagnostic = diagnostic
+                    }
+                    let observation: MenuBarGuardObservation
+                    switch result.reachability {
+                    case .reachable: observation = .reachable
+                    case .temporarilyObscured: observation = .obscured
+                    case .indeterminate: observation = .indeterminate
+                    case .unreachable: observation = .unreachable
+                    case .unauthorized: observation = .unauthorized
+                    }
+                    switch self.guardPolicy.observe(observation, at: ProcessInfo.processInfo.systemUptime) {
+                    case .keepHidden: break
+                    case .revealPreservingSetup:
+                        self.finishNativeFailure("Menu bar verification is temporarily unavailable. Your layout is saved; click the arrow to retry.", invalidateSetup: false)
+                    case .revealAndInvalidateSetup:
+                        self.finishNativeFailure("Icons were restored after the arrow was confirmed unreachable. Check the divider position.")
                     }
                 }
             }
