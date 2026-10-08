@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Combine
+import OSLog
 
 @MainActor
 final class AutoQuitTask {
@@ -28,6 +29,7 @@ protocol AutoQuitRuntime: AnyObject {
 
 @MainActor
 final class AutoQuitController: ObservableObject {
+    private let logger = Logger(subsystem: "com.dropshelf.macos", category: "AutoQuit")
     static let shared = AutoQuitController(defaults: .standard, runtime: AutoQuitObserverRuntime())
     @Published private(set) var enabled: Bool
     @Published private(set) var keepRunning: Set<String>
@@ -39,6 +41,7 @@ final class AutoQuitController: ObservableObject {
     @Published private(set) var hasReviewedWindowMonitoring: Bool
 
     var status: String { !enabled ? "Off" : (isRunning ? "On" : "Permission needed") }
+    var eventGeneration: UInt64 { generation }
     let ownIdentifier: String
     private let defaults: UserDefaults
     private let runtime: AutoQuitRuntime
@@ -143,9 +146,11 @@ final class AutoQuitController: ObservableObject {
         monitoringCount = states.values.filter { $0.windows != nil }.count
     }
 
-    func windowClosed(_ process: AutoQuitProcess, window: UInt64) {
+    func windowClosed(_ process: AutoQuitProcess, window: UInt64, eventGeneration: UInt64? = nil) {
+        if let eventGeneration, eventGeneration != generation { return }
         guard isEligible(process), var state = states[process] else { return }
         let token = state.closed(window: window)
+        logger.notice("Close received pid=\(process.pid, privacy: .public), remaining=\(state.windows?.count ?? -1, privacy: .public), candidate=\(token != nil, privacy: .public)")
         states[process] = state
         pending.removeValue(forKey: process)?.cancel()
         guard let token else { return }
@@ -157,6 +162,7 @@ final class AutoQuitController: ObservableObject {
                 guard let self, self.generation == epoch, self.isEligible(process),
                       var current = self.states[process], current.pendingToken == token else { return }
                 let allowed = current.consume(token: token, snapshot: snapshot)
+                self.logger.notice("Quit decision pid=\(process.pid, privacy: .public), freshWindows=\(snapshot.windowIDs?.count ?? -1, privacy: .public), allowed=\(allowed, privacy: .public)")
                 self.states[process] = current
                 self.pending.removeValue(forKey: process)?.cancel()
                 guard allowed else { return }
@@ -171,7 +177,7 @@ final class AutoQuitController: ObservableObject {
         guard isEligible(process), var state = states[process] else { return }
         // A creation proves the old baseline is incomplete even if AXWindows
         // has not caught up. Queued older destruction must not arm from it.
-        state.observe(.uncertain)
+        state.created()
         states[process] = state
         pending.removeValue(forKey: process)?.cancel()
         monitoringCount = states.values.filter { $0.windows != nil }.count
@@ -200,6 +206,13 @@ final class AutoQuitController: ObservableObject {
         states.removeAll()
         monitoringCount = 0
         unsupportedApps.removeAll()
+    }
+
+    func cancelPendingDecisions() {
+        generation &+= 1
+        pending.values.forEach { $0.cancel() }
+        pending.removeAll()
+        for process in states.keys { states[process]?.invalidate() }
     }
 
     func restartBaseline() {

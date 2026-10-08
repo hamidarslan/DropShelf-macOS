@@ -33,10 +33,12 @@ struct AutoQuitDecisionState {
     private(set) var pendingToken: UInt64?
     private var generation: UInt64 = 0
     private var eligibleWindows: Set<UInt64> = []
+    private var creationPending = false
 
     mutating func observe(_ snapshot: AutoQuitWindowSnapshot) {
         switch snapshot {
         case .known(let current, let eligible):
+            if creationPending && current.isEmpty { invalidate(); return }
             let eligible = eligible ?? current
             guard eligible.isSubset(of: current) else {
                 observe(.uncertain)
@@ -45,10 +47,11 @@ struct AutoQuitDecisionState {
             if windows != current || eligibleWindows != eligible { invalidate() }
             windows = current
             eligibleWindows = eligible
+            creationPending = false
         case .uncertain:
             invalidate()
-            windows = nil
-            eligibleWindows.removeAll()
+            // Keep the last verified identities. A subsequent genuine destruction
+            // can be rechecked, but an uncertain read never permits a quit itself.
         }
     }
 
@@ -57,7 +60,7 @@ struct AutoQuitDecisionState {
         let wasEligible = eligibleWindows.remove(window) != nil
         invalidate()
         windows = current
-        guard current.isEmpty, wasEligible else { return nil }
+        guard current.isEmpty, wasEligible, !creationPending else { return nil }
         pendingToken = generation
         return generation
     }
@@ -74,6 +77,11 @@ struct AutoQuitDecisionState {
         generation &+= 1
         pendingToken = nil
     }
+
+    mutating func created() {
+        invalidate()
+        creationPending = true
+    }
 }
 
 enum AutoQuitProtection {
@@ -88,4 +96,20 @@ enum AutoQuitProtection {
         return identifier.isEmpty || identifier == ownIdentifier.lowercased()
             || protectedIdentifiers.contains(identifier)
     }
+}
+
+enum AutoQuitAttachmentRetry {
+    static func delay(after attempt: Int) -> TimeInterval? {
+        let delays: [TimeInterval] = [0.5, 1, 2]
+        return delays.indices.contains(attempt) ? delays[attempt] : nil
+    }
+}
+
+enum AutoQuitElementValidity { case valid, invalid, uncertain }
+
+enum AutoQuitStaleWindowPolicy {
+    static func mayRetireDialog(closeEligible: Bool, validity: AutoQuitElementValidity) -> Bool {
+        !closeEligible && validity == .invalid
+    }
+
 }
