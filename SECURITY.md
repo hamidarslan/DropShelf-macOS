@@ -14,6 +14,14 @@ On macOS 27 and later, the organizer requests Accessibility permission only afte
 
 Queries run off the main thread with node, depth, and time limits. Temporary overlays and brief query failures do not erase a verified layout. Repeated evidence of an unreachable arrow or prolonged uncertain verification restores icons and pauses hiding while retaining setup. Recovery does not start a timed test; only the explicit Settings test uses an auto-restore timer. Missing permission prevents hiding. Local system logs record verification reason codes and timing, without UI text or file contents. The organizer uses native status items, not assessment-mode restrictions or persistent unloading of other apps' icons. Ad-hoc signing means a new build can require a renewed Accessibility grant. These checks reduce the risk of losing the reveal control; they cannot guarantee compatibility with untested future macOS releases.
 
+## Auto Quit
+
+Auto Quit is off by default and requires user enablement. The module uses Accessibility window creation/destruction notifications, window roles, and typed window lists. It reads application identity and window lifecycle/state only, without window titles, document contents, screenshots, or uploads. Only preferences, the first-use explanation acknowledgement, and Keep running bundle identifiers are saved; window/process tracking stays in memory.
+
+A known last-window destruction starts a one-second delay. A fresh successful empty-window check, unchanged process identity, valid permission, and current exception settings are required before sending `NSRunningApplication.terminate()`. Requests allow the target app's normal save prompts or refusal. The module never force-quits, sends kill signals, edits Dock preferences, or repeatedly requests quitting for the same event. Missing or failed reads remain uncertain, and unsupported apps are left running.
+
+Finder, DropShelf, Dock, login/system services, and non-regular/background agents are excluded. Remaining window identities are retained until their destruction is observed, including minimized or hidden windows. Pending requests are canceled on disablement, exception changes, process exit, permission loss, and sleep. Normal quitting can still interrupt background work an app does not protect; the user must put these apps in Keep running. These checks do not prove that every app exposes complete Accessibility information or that an app's own quit implementation preserves all work.
+
 ## Files and history
 
 Original file references are never eligible for automatic cleanup. Generated file ownership is recorded per URL and cleanup is restricted to the staging directory, including a resolved-path check. Stacking and splitting preserve that ownership.

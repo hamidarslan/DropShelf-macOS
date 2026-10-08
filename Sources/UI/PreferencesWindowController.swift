@@ -15,6 +15,10 @@ import SwiftUI
         present(section: .menuBar)
     }
 
+    public func showAutoQuit() {
+        present(section: .autoQuit)
+    }
+
     private func present(section: PreferencesSection) {
         navigation.selection = section
         if let win = window {

@@ -24,6 +24,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         ClipboardStore.shared.start()
+        AutoQuitController.shared.start()
 
         // Start Global Drag Monitor
         GlobalDragMonitor.shared.start()
@@ -210,6 +211,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        AutoQuitController.shared.shutdown()
         MenuBarOrganizerController.shared.shutdown()
         organizerObservation?.cancel()
         statusIconObservation?.cancel()
@@ -289,6 +291,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         for item in MenuBarOrganizerController.shared.makeContextMenuItems() {
             menu.addItem(item)
         }
+        menu.addItem(.separator())
+
+        let autoQuitItem = NSMenuItem(title: "Auto Quit", action: #selector(toggleAutoQuit), keyEquivalent: "")
+        autoQuitItem.target = self
+        autoQuitItem.state = AutoQuitController.shared.enabled ? .on : .off
+        menu.addItem(autoQuitItem)
+        let autoQuitSettings = NSMenuItem(title: "Auto Quit Settings…", action: #selector(openAutoQuitSettings), keyEquivalent: "")
+        autoQuitSettings.target = self
+        menu.addItem(autoQuitSettings)
         menu.addItem(.separator())
 
         if !ShelfStore.shared.items.isEmpty {
@@ -414,6 +425,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.performClick(nil)
         // Reset so subsequent clicks toggle panel directly
         statusItem.menu = nil
+    }
+
+    @objc private func toggleAutoQuit() {
+        if !AutoQuitController.shared.enabled && !AutoQuitController.shared.hasReviewedWindowMonitoring {
+            PreferencesWindowController.shared.showAutoQuit()
+            return
+        }
+        AutoQuitController.shared.setEnabled(!AutoQuitController.shared.enabled)
+    }
+
+    @objc private func openAutoQuitSettings() {
+        PreferencesWindowController.shared.showAutoQuit()
     }
 
     @objc private func openPreferences() {

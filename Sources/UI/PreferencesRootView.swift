@@ -3,8 +3,15 @@ import SwiftUI
 enum PreferencesSection: String, CaseIterable {
     case general = "General"
     case menuBar = "Menu Bar"
+    case autoQuit = "Auto Quit"
 
-    var symbol: String { self == .general ? "slider.horizontal.3" : "menubar.rectangle" }
+    var symbol: String {
+        switch self {
+        case .general: return "slider.horizontal.3"
+        case .menuBar: return "menubar.rectangle"
+        case .autoQuit: return "power"
+        }
+    }
 }
 
 @MainActor final class PreferencesNavigation: ObservableObject {
@@ -73,8 +80,10 @@ struct PreferencesRootView: View {
                             .padding(.horizontal, 18)
                         SettingsView(embedded: true)
                     }
-                } else {
+                } else if navigation.selection == .menuBar {
                     MenuBarOrganizerSettingsView()
+                } else {
+                    AutoQuitSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
