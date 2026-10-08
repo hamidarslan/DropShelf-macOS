@@ -9,7 +9,7 @@ enum MenuBarGuardObservation: Equatable {
 enum MenuBarGuardDecision: Equatable {
     case keepHidden
     case revealPreservingSetup
-    case revealAndInvalidateSetup
+    case revealForControlLoss
 }
 
 struct MenuBarGuardPolicy {
@@ -44,7 +44,7 @@ struct MenuBarGuardPolicy {
                 : .keepHidden
         case .unreachable:
             consecutiveUnreachable += 1
-            if consecutiveUnreachable >= 2 { return .revealAndInvalidateSetup }
+            if consecutiveUnreachable >= 2 { return .revealForControlLoss }
             guard let unverifiedSince else { return .keepHidden }
             return monotonicTime - unverifiedSince >= Self.unknownGrace
                 ? .revealPreservingSetup

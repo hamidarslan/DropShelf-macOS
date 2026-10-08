@@ -18,6 +18,11 @@ final class MenuBarOrganizerTask {
     }
 }
 
+enum MenuBarHideIntent: Equatable {
+    case ordinary
+    case settingsTrial
+}
+
 @MainActor
 protocol MenuBarOrganizerRuntime: AnyObject {
     var displaySignature: String { get }
@@ -33,7 +38,8 @@ protocol MenuBarOrganizerRuntime: AnyObject {
     func refreshCapabilities()
     func start(anchor: NSStatusItem, controller: MenuBarOrganizerController)
     func stop()
-    func apply(hidden: Bool, separateToggle: Bool, completion: @escaping @MainActor (Bool) -> Void)
+    func apply(hidden: Bool, separateToggle: Bool, intent: MenuBarHideIntent,
+               completion: @escaping @MainActor (Bool) -> Void)
     func registerShortcut(_ shortcut: MenuBarShortcut) -> Bool
     func unregisterShortcut()
     func allowsHiding() -> Bool
@@ -97,7 +103,10 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
                     defaults.removeObject(forKey: "organizer.visibilityConfirmation")
                     reveal()
                     refreshVisibilityRequirement(requestSettings: true)
-                } else { applyLayout(hidden: hidden, resumeAutoHideWhenVisible: !hidden) }
+                } else {
+                    applyLayout(hidden: hidden, intent: activeHideIntent ?? .ordinary,
+                                resumeAutoHideWhenVisible: !hidden)
+                }
             }
         }
     }
@@ -117,6 +126,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
     private var generation: UInt64 = 0
     private var layoutGeneration: UInt64 = 0
     private var applyEpoch: UInt64 = 0
+    private var activeHideIntent: MenuBarHideIntent?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var displaySignature = ""
     private var activeVisibilityScope = ""
@@ -222,19 +232,22 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         applyLayout(hidden: false, resumeAutoHideWhenVisible: true,
                     confirmsVisibilityTrial: confirmingVisibilityTrial)
     }
-    func hide() {
+    func hide(intent: MenuBarHideIntent = .ordinary) {
+        performHide(intent: intent, allowsClosedSettingsTrial: false)
+    }
+    private func performHide(intent: MenuBarHideIntent, allowsClosedSettingsTrial: Bool) {
         guard enabled && isRunning, !isArranging, !isApplying else { return }
         guard hidingAvailable else { reveal(); updateStatus(); return }
         refreshConflictingOrganizerState()
         guard !conflictingOrganizerRunning else { updateStatus(); return }
         refreshVisibilityRequirement()
         guard !hidden else { return }
-        guard !requiresVisibilityConfirmation || runtime.allowsVisibilityTrial else {
+        guard !requiresVisibilityConfirmation || allowsClosedSettingsTrial || runtime.allowsVisibilityTrial else {
             showSettings?(); return
         }
         startupDeadline = nil; cancelHide(); pauseTask?.cancel(); pauseTask = nil
         pause = .none; updatePause()
-        applyLayout(hidden: true)
+        applyLayout(hidden: true, intent: intent)
     }
     func toggleFromMenuBarControl() {
         guard enabled && isRunning else { return }
@@ -244,7 +257,7 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
             reveal(confirmingVisibilityTrial: requiresVisibilityConfirmation)
         } else {
             if isArranging { endArranging() }
-            hide()
+            performHide(intent: .ordinary, allowsClosedSettingsTrial: true)
         }
     }
     func beginArranging() {
@@ -340,23 +353,28 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         applyEpoch &+= 1
         isApplying = false
         pendingHiddenTarget = nil
+        activeHideIntent = nil
         hidden = false
     }
-    private func applyLayout(hidden target: Bool, resumeAutoHideWhenVisible: Bool = false,
+    private func applyLayout(hidden target: Bool, intent: MenuBarHideIntent = .ordinary,
+                             resumeAutoHideWhenVisible: Bool = false,
                              confirmsVisibilityTrial: Bool = false) {
         applyEpoch &+= 1
         let epoch = applyEpoch
         isApplying = true
         pendingHiddenTarget = target
+        activeHideIntent = target ? intent : nil
         hidden = false
         updateStatus()
-        runtime.apply(hidden: target, separateToggle: showSeparateToggle) { [weak self] actualHidden in
+        runtime.apply(hidden: target, separateToggle: showSeparateToggle, intent: intent) { [weak self] actualHidden in
             guard let self, self.applyEpoch == epoch else { return }
             self.isApplying = false
             self.pendingHiddenTarget = nil
             self.hidden = target && actualHidden
+            self.activeHideIntent = self.hidden ? intent : nil
             if confirmsVisibilityTrial && !target && !actualHidden && self.requiresVisibilityConfirmation {
                 self.hasVisibilityTrial = true
+                self.completeSetup()
             }
             self.updateStatus()
             if resumeAutoHideWhenVisible && !self.hidden { self.scheduleAutoHide() }
@@ -458,8 +476,17 @@ final class MenuBarOrganizerController: NSObject, ObservableObject {
         if invalidated && requestSettings { showSettings?() }
     }
     func expireVisibilityTrial() {
-        guard enabled, isRunning, hidden, requiresVisibilityConfirmation else { return }
-        rejectVisibilityTrial()
+        guard enabled, isRunning, hidden, activeHideIntent == .settingsTrial else { return }
+        logger.notice("Explicit menu bar visibility trial expired")
+        hasVisibilityTrial = false
+        reveal()
+    }
+    func recoverFromVerificationFailure() {
+        guard enabled, isRunning else { return }
+        pauseTask?.cancel(); pauseTask = nil
+        pause = .untilResumed
+        updatePause()
+        reveal()
     }
     func rejectVisibilityTrial() {
         hasVisibilityTrial = false

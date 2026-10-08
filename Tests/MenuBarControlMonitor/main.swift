@@ -55,8 +55,8 @@ check(MenuBarControlClassifier.classify(partial, mode: .collapsed), .indetermina
 let missing = MenuBarControlClassificationEvidence(
     authorized: true, tree: .complete(arrowCount: 0, dividerCount: 0), geometry: .unavailable,
     applicationHit: .unavailable, systemHit: .unavailable)
-check(MenuBarControlClassifier.classify(missing, mode: .collapsed), .unreachable,
-      "complete tree absence proves arrow loss")
+check(MenuBarControlClassifier.classify(missing, mode: .collapsed), .indeterminate,
+      "a successful empty tree remains insufficient to prove physical arrow loss")
 
 let displaced = MenuBarControlClassificationEvidence(
     authorized: true, tree: .complete(arrowCount: 1, dividerCount: 1), geometry: .outsideMenuBar,
@@ -91,8 +91,20 @@ check(MenuBarControlClassifier.classify(unknownApplicationHit, mode: .collapsed)
 let missingExpandedDivider = MenuBarControlClassificationEvidence(
     authorized: true, tree: .complete(arrowCount: 1, dividerCount: 0), geometry: .valid,
     applicationHit: .ownControl, systemHit: .ownControl)
-check(MenuBarControlClassifier.classify(missingExpandedDivider, mode: .expanded), .unreachable,
-      "expanded preflight requires the divider")
+check(MenuBarControlClassifier.classify(missingExpandedDivider, mode: .expanded), .indeterminate,
+      "a missing expanded divider denies placement without proving lasting physical loss")
+
+let invalidGeometry = MenuBarControlClassificationEvidence(
+    authorized: true, tree: .complete(arrowCount: 1, dividerCount: 1), geometry: .invalid,
+    applicationHit: .unavailable, systemHit: .unavailable)
+check(MenuBarControlClassifier.classify(invalidGeometry, mode: .collapsed), .indeterminate,
+      "zero or malformed AX geometry cannot erase a saved confirmation")
+
+let invalidOrder = MenuBarControlClassificationEvidence(
+    authorized: true, tree: .complete(arrowCount: 1, dividerCount: 1), geometry: .invalidOrder,
+    applicationHit: .unavailable, systemHit: .unavailable)
+check(MenuBarControlClassifier.classify(invalidOrder, mode: .expanded), .unreachable,
+      "verified invalid placement remains unreachable")
 
 func placementPermitsHide(_ evidence: MenuBarControlClassificationEvidence) -> Bool {
     let reachability = MenuBarControlClassifier.classify(evidence, mode: .expanded)
@@ -106,7 +118,8 @@ if !placementPermitsHide(foreignWindow) || !placementPermitsHide(applicationHelp
     failures += 1
     fputs("FAIL: a verified arrow placement can hide while an unrelated overlay is present\n", stderr)
 }
-for evidence in [partial, missing, displaced, ambiguous, denied, systemDivider, unknownSystemControl, missingExpandedDivider] {
+for evidence in [partial, missing, displaced, ambiguous, denied, systemDivider, unknownSystemControl,
+                 missingExpandedDivider, invalidGeometry, invalidOrder] {
     if placementPermitsHide(evidence) {
         failures += 1
         fputs("FAIL: uncertain or displaced controls must not permit hiding\n", stderr)

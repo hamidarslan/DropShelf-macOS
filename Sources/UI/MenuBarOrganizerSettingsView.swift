@@ -221,10 +221,10 @@ struct MenuBarOrganizerSettingsView: View {
             guideStep(1, "Hold Command (⌘) and drag less-used icons to the left of the divider in your real menu bar.")
             guideStep(2, organizer.showSeparateToggle ? "Keep the arrow and the icons you use every day on the right." : "Keep DropShelf and the icons you use every day on the right.")
             guideStep(3, "Click the menu bar arrow to hide your chosen icons, then click it again to reveal them.")
+            Text("Try hiding automatically reveals icons after 10 seconds.")
+                .font(.system(size: 11)).foregroundColor(palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
             if organizer.requiresVisibilityConfirmation {
-                Text("The test automatically reveals icons after 10 seconds. Finish setup only after the menu bar arrow works both ways.")
-                    .font(.system(size: 11)).foregroundColor(palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
                 Text(organizer.showSeparateToggle ? "Check that your chosen icons disappear while the arrow stays in the menu bar. Click the arrow again to restore them. Reopen DropShelf from Applications if you need to reveal everything." : "Check that your chosen icons disappear while DropShelf stays in the menu bar. Option-click DropShelf to restore them. Reopen DropShelf from Applications if needed.")
                     .font(.system(size: 11)).foregroundColor(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -232,7 +232,7 @@ struct MenuBarOrganizerSettingsView: View {
             HStack(spacing: 8) {
                 Button("Try hiding") {
                     organizer.endArranging()
-                    organizer.hide()
+                    organizer.hide(intent: .settingsTrial)
                 }.disabled(organizer.isApplying)
                 Button("Show icons") {
                     organizer.reveal()
