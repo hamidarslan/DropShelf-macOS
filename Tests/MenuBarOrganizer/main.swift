@@ -9,11 +9,13 @@ func check(_ condition: Bool, _ label: String) {
 @MainActor final class TestRuntime: MenuBarOrganizerRuntime {
     struct PendingLayout {
         let requestedHidden: Bool
+        let intent: MenuBarHideIntent
         let completion: @MainActor (Bool) -> Void
     }
     var starts = 0
     var stops = 0
     var layouts: [Bool] = []
+    var layoutIntents: [MenuBarHideIntent] = []
     var activeShortcut: MenuBarShortcut?
     var rejectShortcut = false
     var canHide = true
@@ -35,11 +37,13 @@ func check(_ condition: Bool, _ label: String) {
     func start(anchor: NSStatusItem, controller: MenuBarOrganizerController) { starts += 1 }
     func stop() { stops += 1; activeShortcut = nil }
     func refreshCapabilities() { capabilityRefreshes += 1 }
-    func apply(hidden: Bool, separateToggle: Bool, completion: @escaping @MainActor (Bool) -> Void) {
+    func apply(hidden: Bool, separateToggle: Bool, intent: MenuBarHideIntent,
+               completion: @escaping @MainActor (Bool) -> Void) {
         layouts.append(hidden)
+        layoutIntents.append(intent)
         let result = hidden && acceptLayout
         if holdLayoutCompletions {
-            pendingLayouts.append(PendingLayout(requestedHidden: hidden, completion: completion))
+            pendingLayouts.append(PendingLayout(requestedHidden: hidden, intent: intent, completion: completion))
         } else {
             completion(result)
         }
@@ -362,6 +366,58 @@ shutdownRuntime.completeLayout(as: false)
 check(!shutdownController.isRunning && !shutdownController.hidden && !shutdownController.isApplying,
       "callbacks arriving after shutdown remain inert")
 
+let intentSuite = suite + ".hide-intent"
+let intentDefaults = UserDefaults(suiteName: intentSuite)!
+defer { intentDefaults.removePersistentDomain(forName: intentSuite) }
+intentDefaults.set(true, forKey: "organizer.enabled")
+intentDefaults.set(false, forKey: "organizer.autoHide")
+intentDefaults.set(false, forKey: "organizer.startHidden")
+let intentRuntime = TestRuntime()
+intentRuntime.requiresVisibilityConfirmation = true
+intentRuntime.requiresDedicatedArrow = true
+intentRuntime.allowsVisibilityTrial = true
+let intentController = MenuBarOrganizerController(defaults: intentDefaults, runtime: intentRuntime,
+    now: { now }, schedule: TestScheduler().schedule)
+intentController.configure(anchor: anchor) {}
+
+intentController.hide(intent: .settingsTrial)
+check(intentController.hidden && intentRuntime.layoutIntents.last == .settingsTrial,
+      "explicit Settings trial reaches the runtime with trial intent")
+intentController.expireVisibilityTrial()
+check(!intentController.hidden && intentController.requiresVisibilityConfirmation &&
+      !intentController.hasCompletedSetup,
+      "explicit Settings trial expiry reveals and leaves setup pending")
+
+intentController.hide(intent: .settingsTrial)
+intentController.reveal()
+intentRuntime.allowsVisibilityTrial = false
+intentController.toggleFromMenuBarControl()
+check(intentController.hidden && intentRuntime.layoutIntents.last == .ordinary,
+      "dedicated native arrow can start an ordinary pending-confirmation hide with Settings closed")
+intentController.expireVisibilityTrial()
+check(intentController.hidden,
+      "stale Settings expiry cannot reveal a later ordinary native hide")
+intentController.toggleHiddenItems()
+check(!intentController.hidden && !intentController.hasCompletedSetup &&
+      intentController.requiresVisibilityConfirmation,
+      "generic toggle reveal cannot confirm the dedicated native arrow")
+
+intentController.toggleFromMenuBarControl()
+check(intentController.hidden && !intentController.hasCompletedSetup,
+      "native confirmation cycle records a successful ordinary hide first")
+intentController.toggleFromMenuBarControl()
+let confirmedScope = intentDefaults.string(forKey: "organizer.visibilityConfirmation")
+check(!intentController.hidden && intentController.hasCompletedSetup &&
+      !intentController.requiresVisibilityConfirmation && confirmedScope != nil,
+      "successful native reveal automatically confirms and persists the current layout")
+
+intentController.toggleFromMenuBarControl()
+check(intentController.hidden, "confirmed fixture returns to a verified hidden state")
+intentController.recoverFromVerificationFailure()
+check(!intentController.hidden && intentController.isPaused && intentController.hasCompletedSetup &&
+      intentDefaults.string(forKey: "organizer.visibilityConfirmation") == confirmedScope,
+      "runtime guard recovery reveals and pauses without discarding confirmed setup")
+
 let capabilitySuite = suite + ".capability-refresh"
 let capabilityDefaults = UserDefaults(suiteName: capabilitySuite)!
 defer { capabilityDefaults.removePersistentDomain(forName: capabilitySuite) }
@@ -580,23 +636,24 @@ check(!confirmation.hidden && confirmation.hasVisibilityTrial,
 confirmation.rejectVisibilityTrial()
 check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
       "failed post-layout recovery invalidates the trial before confirmation")
-confirmation.hide()
+confirmation.hide(intent: .settingsTrial)
 confirmation.expireVisibilityTrial()
 check(!confirmation.hidden && !confirmation.hasVisibilityTrial && confirmation.requiresVisibilityConfirmation,
       "an unconfirmed trial timeout restores icons and keeps setup pending")
 confirmation.hide()
 confirmation.toggleFromMenuBarControl()
-confirmationRuntime.requiresVisibilityConfirmation = false
-confirmation.refreshVisibilityRequirement()
-check(confirmation.requiresVisibilityConfirmation && confirmation.hasVisibilityTrial,
-      "temporary remote-host capability changes preserve pending manual confirmation and the trial")
-confirmationRuntime.requiresVisibilityConfirmation = true
-confirmation.reveal(); confirmation.hide(); confirmation.completeSetup()
-check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && confirmation.hidden,
-      "explicit confirmation while hidden completes a successful arrow trial")
+check(confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation && !confirmation.hidden &&
+      confirmationDefaults.string(forKey: "organizer.visibilityConfirmation") != nil,
+      "verified native reveal automatically completes and persists setup")
+confirmation.hide(intent: .settingsTrial)
 confirmation.expireVisibilityTrial()
-check(confirmation.hidden && confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation,
-      "an old trial timeout cannot undo a layout that has already been confirmed")
+check(!confirmation.hidden && confirmation.hasCompletedSetup && !confirmation.requiresVisibilityConfirmation &&
+      confirmationDefaults.string(forKey: "organizer.visibilityConfirmation") != nil,
+      "explicit trial timeout preserves an already confirmed layout")
+confirmation.hide()
+confirmation.expireVisibilityTrial()
+check(confirmation.hidden && confirmation.hasCompletedSetup,
+      "ordinary hide ignores trial expiry after confirmation")
 confirmation.reveal()
 check(!confirmationScheduler.entries.isEmpty, "confirmed layout schedules automatic hiding after reveal")
 confirmation.shutdown()

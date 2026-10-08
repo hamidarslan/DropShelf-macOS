@@ -14,7 +14,7 @@ check(policy.observe(.indeterminate, at: 1) == .keepHidden,
 check(policy.observe(.reachable, at: 2) == .keepHidden,
       "healthy recovery clears a transient timeout")
 check(policy.observe(.unreachable, at: 3) == .keepHidden,
-      "one loss after recovery does not invalidate setup")
+      "one loss after recovery does not restore icons for control loss")
 check(policy.observe(.reachable, at: 4) == .keepHidden,
       "healthy sampling resets the loss streak")
 
@@ -38,8 +38,8 @@ check(policy.observe(.unreachable, at: 621) == .keepHidden,
 policy.reset()
 check(policy.observe(.unreachable, at: 700) == .keepHidden,
       "first confirmed loss waits for a second sample")
-check(policy.observe(.unreachable, at: 701) == .revealAndInvalidateSetup,
-      "two consecutive confirmed losses reveal and invalidate setup")
+check(policy.observe(.unreachable, at: 701) == .revealForControlLoss,
+      "two consecutive confirmed losses restore icons for confirmed control loss")
 
 policy.reset()
 check(policy.observe(.unreachable, at: 800) == .keepHidden,
@@ -47,8 +47,8 @@ check(policy.observe(.unreachable, at: 800) == .keepHidden,
 policy.reset()
 check(policy.observe(.unreachable, at: 801) == .keepHidden,
       "new hide or reveal resets the previous loss")
-check(policy.observe(.unreachable, at: 802) == .revealAndInvalidateSetup,
-      "a fresh pair of confirmed losses still invalidates setup")
+check(policy.observe(.unreachable, at: 802) == .revealForControlLoss,
+      "a fresh pair of confirmed losses still restores icons for control loss")
 
 policy.reset()
 check(policy.observe(.unreachable, at: 900) == .keepHidden,

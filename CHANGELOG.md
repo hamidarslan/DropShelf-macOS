@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.4
+
+- Restrict the ten-second auto-restore timer to the explicit Settings test. Ordinary menu-bar arrow clicks never start a timed trial.
+- Complete setup automatically after a verified native-arrow hide and reveal cycle.
+- Preserve saved setup after runtime recovery so a check failure cannot trap normal use in repeated setup tests.
+- Treat missing Accessibility identifiers and malformed frames as uncertain readings. Persist the reason for an actual recovery in local diagnostics.
+
 ## 1.6.3
 
 - Keep the menu bar collapsed through temporary Accessibility read failures, tooltips, and covering menus. Require repeated evidence before treating the arrow as lost.

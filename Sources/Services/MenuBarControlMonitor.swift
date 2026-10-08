@@ -88,15 +88,15 @@ enum MenuBarControlClassifier {
                          mode: MenuBarControlInspectionMode) -> MenuBarControlReachability {
         guard evidence.authorized else { return .unauthorized }
         guard case .complete(let arrowCount, let dividerCount) = evidence.tree else { return .indeterminate }
-        if arrowCount == 0 { return .unreachable }
+        if arrowCount == 0 { return .indeterminate }
         guard arrowCount == 1 else { return .indeterminate }
         if mode == .expanded {
-            if dividerCount == 0 { return .unreachable }
+            if dividerCount == 0 { return .indeterminate }
             guard dividerCount == 1 else { return .indeterminate }
         }
         switch evidence.geometry {
-        case .outsideMenuBar, .invalidOrder, .invalid: return .unreachable
-        case .unavailable: return .indeterminate
+        case .outsideMenuBar, .invalidOrder: return .unreachable
+        case .invalid, .unavailable: return .indeterminate
         case .valid: break
         }
         switch evidence.systemHit {
@@ -413,7 +413,7 @@ final class MenuBarControlMonitor {
         switch frame(of: arrowMatches[0]) {
         case .value(let value): arrowFrame = value
         case .invalid:
-            return result(work, reachability: .unreachable, reason: .invalidFrame, stage: .arrowFrame)
+            return result(work, reachability: .indeterminate, reason: .invalidFrame, stage: .arrowFrame)
         case .failure(let error):
             return uncertain(work, reason: .partialRead, stage: .arrowFrame, error: error)
         }
@@ -433,7 +433,7 @@ final class MenuBarControlMonitor {
             case .value(let value): dividerFrame = value
             case .invalid:
                 return result(work, arrowFrame: arrowFrame, menuBarFrame: menuBarFrame,
-                    reachability: .unreachable, reason: .invalidFrame, stage: .dividerFrame)
+                    reachability: .indeterminate, reason: .invalidFrame, stage: .dividerFrame)
             case .failure(let error):
                 return uncertain(work, arrowFrame: arrowFrame, menuBarFrame: menuBarFrame,
                     reason: .partialRead, stage: .dividerFrame, error: error)

@@ -45,7 +45,7 @@ Hold Command and drag less-used icons to the left of the divider in the real men
 
 On macOS 27 and later, enable **menu bar verification** when prompted from Settings. This requires Accessibility permission so DropShelf can locate its controls in the system menu bar and check that the arrow remains reachable. The check reads menu-bar layout only; it does not record the screen, perform Accessibility clicks, or upload data. Older supported macOS versions retain the existing native placement checks without this permission.
 
-The first hide test automatically reveals icons after ten seconds. Use the actual menu-bar arrow to reveal them before completing setup. An OS or display change requires a new check. If the arrow cannot be verified during operation, DropShelf restores the icons. Future macOS changes can require compatibility updates; a failed check keeps icons visible.
+The optional **Try hiding** button in Settings runs a ten-second test. Ordinary arrow clicks do not start this timer. A verified hide-and-reveal cycle through the native arrow completes setup automatically. An OS or display change requires a fresh verified cycle. If a runtime check fails, DropShelf restores icons and pauses hiding while preserving your saved setup. Future macOS changes can require compatibility updates; a failed check keeps icons visible.
 
 - Click DropShelf normally to toggle the shelf. Option-click toggles hidden menu bar icons while the organizer is enabled.
 - Right-click for organizer controls, pauses, and settings. The dedicated arrow remains enabled on macOS 27 and later.
